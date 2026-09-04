@@ -1,0 +1,3 @@
+aiogram
+psutil
+python-dotenv
