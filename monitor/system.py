@@ -2,7 +2,7 @@ import psutil
 import json
 import subprocess
 import time
-from docker_monitor import get_containers_health
+from monitor.docker_monitor import get_containers_health
 
 cpu_therm = 'k10temp'
 
