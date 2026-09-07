@@ -1,11 +1,23 @@
 import psutil
 import json
-from psutil._common import bytes2human
 import subprocess
+import time
 
 cpu_therm = 'k10temp'
 
-def cpu_check():
+def get_status() -> dict:
+    cpu_data = cpu_check()
+    ram_data = ram_check()
+    disk_data = disk_check()
+    uptime = get_uptime()
+    return {
+        "cpu": cpu_data,
+        "ram": ram_data,
+        "disks": disk_data,
+        "uptime": uptime
+    }
+
+def cpu_check() -> dict:
     data = psutil.sensors_temperatures()
     cpu_temp = data[cpu_therm][0].current
     cpu_load = psutil.cpu_percent()
@@ -16,18 +28,20 @@ def cpu_check():
         "load_average": cpu_avg_load
     }
 
-def ram_check():
+def ram_check() -> dict:
     ram = psutil.virtual_memory()
-    print('Total ram', bytes2human(ram.total))
-    print('Available ram', bytes2human(ram.available))
-    print('Ram usage:', ram.percent, "%")
+    ram_swap = psutil.swap_memory()
     return {
         "total": ram.total,
         "available": ram.available,
-        "usage": ram.percent
+        "usage": ram.percent,
+        "swap_total": ram_swap.total,
+        "swap_used": ram_swap.used,
+        "swap_free": ram_swap.free,
+        "swap_usage": ram_swap.percent
     }
 
-def disk_check():
+def disk_check() -> dict:
 
     disks = psutil.disk_partitions()
 
@@ -35,7 +49,7 @@ def disk_check():
 
     for device in disks:
 
-        disk = device.device[:-1]
+        disk = get_parent_block(device.device)
 
         disk_dict.setdefault(disk, {
             "temperature": None,
@@ -43,39 +57,44 @@ def disk_check():
         })
 
         memory_info = psutil.disk_usage(device.mountpoint)
-
         disk_dict[disk]["partitions"].append({
             "partition": device.device,
             "mountpoint": device.mountpoint,
             "total": memory_info.total,
             "used": memory_info.used,
+            "free": memory_info.free,
+            "usage_percent": memory_info.percent
         })
 
     for disk in disk_dict:
         temperature = get_disk_temp(disk)
         disk_dict[disk]['temperature'] = temperature
 
-    for disk, info in disk_dict.items():
-        print("Disk:", disk)
-        print("Temperature:", info["temperature"])
-
-        for partition in info["partitions"]:
-            print("\nPartition:", partition["partition"])
-            print("Mountpoint:", partition["mountpoint"])
-            print("Total:", bytes2human(partition["total"]))
-            print("Used:", bytes2human(partition["used"]))
-
-        print()
-
     return disk_dict
 
 
-def get_disk_temp(drive_path):
+def get_disk_temp(drive_path: str) -> float | None:
     result = subprocess.run(
         ['sudo', 'smartctl', '-A', '-j', drive_path],
         capture_output=True,
         text=True)
-
-    disk_data = json.loads(result.stdout)
-    temperature = disk_data["temperature"]['current']
+    try:
+        disk_data = json.loads(result.stdout)
+        temperature = disk_data["temperature"]['current']
+    except Exception:
+        temperature = None
     return temperature
+
+def get_parent_block(drive_path: str) -> str:
+    result = subprocess.run(
+        ['lsblk', '-no', 'pkname', str(drive_path)],
+        capture_output=True,
+        text=True
+    )
+    disk = "/dev/" + str(result.stdout.strip())
+    return disk
+
+def get_uptime():
+    boot_time = psutil.boot_time()
+    uptime_sec = time.time() - boot_time
+    return uptime_sec
