@@ -2,6 +2,7 @@ import psutil
 import json
 import subprocess
 import time
+from docker_monitor import get_containers_health
 
 cpu_therm = 'k10temp'
 
@@ -10,11 +11,13 @@ def get_status() -> dict:
     ram_data = ram_check()
     disk_data = disk_check()
     uptime = get_uptime()
+    docker = get_containers_health()
     return {
         "cpu": cpu_data,
         "ram": ram_data,
         "disks": disk_data,
-        "uptime": uptime
+        "uptime": uptime,
+        "docker": docker
     }
 
 def cpu_check() -> dict:

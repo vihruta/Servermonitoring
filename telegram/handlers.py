@@ -1,7 +1,7 @@
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
-from monitor import system
+from monitor import system, docker_monitor
 import logging
 
 from telegram.formatter import format_cpu, format_ram, format_disk, format_status, format_temp
@@ -49,4 +49,10 @@ async def cmd_temp(message: Message):
     status_data = system.get_status()
     msg = format_temp(status_data=status_data)
     await message.answer(msg)
-    
+
+@start_router.message(Command('docker'))
+async def cmd_docker(message: Message):
+    logger.info('Docker command request')
+    docker_data = docker_monitor.get_containers_health()
+    msg = format_docker_data(docker_data=docker_data)
+    await message.answer(msg)   
