@@ -69,7 +69,7 @@ def disk_check() -> dict[str, DiskMetrics]:
             partition=device.device,
             mountpoint=device.mountpoint,
             total=memory_info.total,
-            used=memory_info.total,
+            used=memory_info.used,
             free=memory_info.free,
             usage_percent=memory_info.percent
         )

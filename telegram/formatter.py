@@ -1,4 +1,7 @@
 from models import CpuMetrics, MemoryMetrics, DiskMetrics, SystemStatus, DockerContainerMetrics
+from alerts.models import MetricStatus
+
+
 line_divider = '__________________________________\n'
 
 def bytes_to_gb(size_bytes):
@@ -81,3 +84,15 @@ def format_docker_data(docker_data: dict[str, DockerContainerMetrics]):
             msg += f'Ошибка: {info.error}\n'
         msg += '\n'
     return msg 
+
+def format_alert(
+        data: dict[str, tuple[MetricStatus, float]]
+        ) -> str:
+    msg = 'ALERT\n'
+    for device, (status, temperature) in data.items():
+        msg += (f'{device}\n'
+                f'Alert: {status.alert.name}\n'
+                f'Температура: {temperature}')
+    return msg
+
+    
