@@ -2,76 +2,81 @@ import psutil
 import json
 import subprocess
 import time
+from models import CpuMetrics, LoadAverage, MemoryMetrics, RamMetrics, SwapMetrics, DiskMetrics, PartitionMetrics, SystemStatus
 from monitor.docker_monitor import get_containers_health
 
 cpu_therm = 'k10temp'
 
-def get_status() -> dict:
-    cpu_data = cpu_check()
-    ram_data = ram_check()
-    disk_data = disk_check()
-    uptime = get_uptime()
-    docker = get_containers_health()
-    return {
-        "cpu": cpu_data,
-        "ram": ram_data,
-        "disks": disk_data,
-        "uptime": uptime,
-        "docker": docker
-    }
+def get_status() -> SystemStatus:
+    return SystemStatus(
+        uptime=get_uptime(),
+        cpu=cpu_check(),
+        memory=ram_check(),
+        disks=disk_check(),
+        docker_containers=get_containers_health()
+    )
 
-def cpu_check() -> dict:
+def cpu_check() -> CpuMetrics:
     data = psutil.sensors_temperatures()
     cpu_temp = data[cpu_therm][0].current
     cpu_load = psutil.cpu_percent()
-    cpu_avg_load = psutil.getloadavg()
-    return {
-        "temperature": cpu_temp,
-        "load": cpu_load, 
-        "load_average": cpu_avg_load
-    }
+    load_1, load_5, load_15 = psutil.getloadavg()
+    return CpuMetrics(
+        temperature=cpu_temp,
+        usage_percent=cpu_load,
+        load_average=LoadAverage(
+            min_1=load_1,
+            min_5=load_5,
+            min_15=load_15
+        )
+    )
 
-def ram_check() -> dict:
+def ram_check() -> MemoryMetrics:
     ram = psutil.virtual_memory()
     ram_swap = psutil.swap_memory()
-    return {
-        "total": ram.total,
-        "available": ram.available,
-        "usage": ram.percent,
-        "swap_total": ram_swap.total,
-        "swap_used": ram_swap.used,
-        "swap_free": ram_swap.free,
-        "swap_usage": ram_swap.percent
-    }
+    return MemoryMetrics(
+        ram=RamMetrics(
+            total=ram.total,
+            available=ram.available,
+            usage=ram.percent
+        ),
+        swap=SwapMetrics(
+            total=ram_swap.total,
+            used=ram_swap.used,
+            free=ram_swap.free,
+            usage=ram_swap.percent
+        )
+    )
 
-def disk_check() -> dict:
+def disk_check() -> dict[str, DiskMetrics]:
 
     disks = psutil.disk_partitions()
 
-    disk_dict = {}
+    disk_dict: dict[str, DiskMetrics] = {}
 
     for device in disks:
 
         disk = get_parent_block(device.device)
 
-        disk_dict.setdefault(disk, {
-            "temperature": None,
-            "partitions": []
-        })
+        if disk not in disk_dict:
+            disk_dict[disk] = DiskMetrics(
+                temperature=None,
+                partitions=[]
+            )
 
         memory_info = psutil.disk_usage(device.mountpoint)
-        disk_dict[disk]["partitions"].append({
-            "partition": device.device,
-            "mountpoint": device.mountpoint,
-            "total": memory_info.total,
-            "used": memory_info.used,
-            "free": memory_info.free,
-            "usage_percent": memory_info.percent
-        })
+        partition = PartitionMetrics(
+            partition=device.device,
+            mountpoint=device.mountpoint,
+            total=memory_info.total,
+            used=memory_info.total,
+            free=memory_info.free,
+            usage_percent=memory_info.percent
+        )
+        disk_dict[disk].partitions.append(partition)
 
-    for disk in disk_dict:
-        temperature = get_disk_temp(disk)
-        disk_dict[disk]['temperature'] = temperature
+    for disk, disk_data in disk_dict.items():
+        disk_data.temperature = get_disk_temp(disk)
 
     return disk_dict
 
