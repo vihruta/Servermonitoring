@@ -24,7 +24,7 @@ class IncidentStore:
         return self.incidents[metric]
     
     def stop(self, metric: str):
-        return self.incidents[metric] - time.monotonic()
+        return time.monotonic() - self.incidents[metric]
 
     def remove(self, metric: str):
         self.incidents.pop(metric)
