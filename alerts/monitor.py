@@ -3,10 +3,11 @@ import logging
 
 from alerts.state_store import StateStore
 from alerts.states import Alert
-from alerts.models import Thresholds, AlertData
-from alerts.manager import check_alert
+from alerts.models import Thresholds, NumericAlertData, ContainerAlertData
+from alerts.manager import check_alert, check_container_alert
 from monitor.system import cpu_check, ram_check, disk_check
-from telegram.notifier import send_alert
+from monitor.docker_monitor import get_containers_health
+from telegram.notifier import send_alert, send_container_alert
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,13 @@ async def monitoring_loop(store: StateStore, bot, chat_id):
     )
     }
 
+    monitored_containers = {
+        "immich_server",
+        "immich_postgres",
+        "immich_redis",
+        "vaultwarden"
+    }
+
     while True:
         try:
             await monitoring_cpu_temperature(store, bot, chat_id, cpu_thresholds)
@@ -48,7 +56,39 @@ async def monitoring_loop(store: StateStore, bot, chat_id):
             await monitoring_disk(store, bot, chat_id, disk_thresholds)
         except Exception:
             logger.exception('Disks monitoring failed')
+        try:
+            await monitoring_containers(store, bot, chat_id, monitored_containers)
+        except Exception:
+            logger.exception('Containers monitoring is failed')
         await asyncio.sleep(5)
+
+
+async def monitoring_containers(store: StateStore, bot, chat_id, monitored_containers: set[str]):
+    containers = get_containers_health()
+    logger.info('Containers monitor is begin')
+
+    for container_name in monitored_containers:
+        container_info = containers.get(container_name)
+
+        if container_info is None:
+            await docker_monitoring_metrics(
+                container_name=container_name,
+                container_status='missing',
+                container_health=None,
+                store=store,
+                bot=bot,
+                chat_id=chat_id
+            )
+        else:
+            await docker_monitoring_metrics(
+                container_name=container_name,
+                container_status=container_info.status,
+                container_health=container_info.health,
+                store=store,
+                bot=bot,
+                chat_id=chat_id
+            )
+        
 
 
 async def monitoring_cpu_temperature(store: StateStore, bot, chat_id, threshold: Thresholds):
@@ -67,7 +107,6 @@ async def monitoring_cpu_temperature(store: StateStore, bot, chat_id, threshold:
         chat_id=chat_id)
 
 async def monitoring_ram_usage(store: StateStore, bot, chat_id, threshold: Thresholds):
-    raise RuntimeError('TEST ERROR')
     ram_usage_percent = ram_check().ram.usage
     if ram_usage_percent is None:
         return None
@@ -120,6 +159,39 @@ async def monitoring_disk(store: StateStore, bot, chat_id, threshold: dict[str, 
                     chat_id=chat_id
                 )
 
+async def docker_monitoring_metrics(
+        container_name: str,
+        container_status: str,
+        container_health: str | None,
+        store: StateStore,
+        bot,
+        chat_id):
+    
+    metric_name = f'docker_{container_name}'
+
+    previous_state = store.get(metric=metric_name)
+
+    status = check_container_alert(
+        status=container_status,
+        health=container_health,
+        previous_state=previous_state
+    )
+
+    if status.alert != Alert.NO_ALERT:
+        await send_container_alert(
+            bot=bot,
+            chat_id=chat_id,
+            status = {
+                container_name: ContainerAlertData(
+                        status=status,
+                        container_status=container_status,
+                        container_health=container_health
+                    )
+                }
+        )
+
+    store.set(metric=metric_name, state=status.state)
+
 async def monitoring_metrics(
         metric_name: str,
         display_name: str,
@@ -139,14 +211,15 @@ async def monitoring_metrics(
     )
 
     if status.alert != Alert.NO_ALERT:
-        await send_alert(bot=bot, 
-                         chat_id=chat_id, 
-                         status={
-                             display_name: AlertData(
-                             status=status,
-                             value=value,
-                             unit=unit
-                         )
-                         }
-                         )
+        await send_alert( 
+            bot=bot, 
+            chat_id=chat_id, 
+            status={
+                    display_name: NumericAlertData(
+                        status=status,
+                        value=value,
+                        unit=unit
+                        )
+                    }
+                )
     store.set(metric_name, status.state)

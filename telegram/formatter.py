@@ -1,5 +1,5 @@
 from models import CpuMetrics, MemoryMetrics, DiskMetrics, SystemStatus, DockerContainerMetrics
-from alerts.models import MetricStatus, AlertData
+from alerts.models import MetricStatus, NumericAlertData, ContainerAlertData
 
 
 
@@ -86,8 +86,9 @@ def format_docker_data(docker_data: dict[str, DockerContainerMetrics]):
         msg += '\n'
     return msg 
 
-def format_alert(
-        data: dict[str, AlertData]
+
+def format_numeric_alert(
+        data: dict[str, NumericAlertData]
         ) -> str:
     msg = 'ALERT\n'
 
@@ -97,4 +98,18 @@ def format_alert(
                 f'Значение: {alert_data.value} {alert_data.unit}')
     return msg
 
-    
+
+def format_container_alert(
+        data: dict[str, ContainerAlertData]
+) -> str:
+    msg = 'ALERT\n'
+
+    for container, alert_data in data.items():
+        msg += (f'{container}\n'
+                f'Alert: {alert_data.status.alert.name}\n'
+                f'Статус: {alert_data.container_status}\n')
+        if alert_data.container_health is not None:
+            msg += f'Health: {alert_data.container_health}'
+        
+
+    return msg

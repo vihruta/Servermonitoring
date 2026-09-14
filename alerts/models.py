@@ -10,7 +10,12 @@ class Thresholds(BaseModel):
     critical: float
     recovery: float
 
-class AlertData(BaseModel):
+class NumericAlertData(BaseModel):
     status: MetricStatus
     value: float
     unit: str
+
+class ContainerAlertData(BaseModel):
+    status: MetricStatus
+    container_status: str
+    container_health: str | None
