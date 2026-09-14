@@ -35,7 +35,7 @@ def format_disk(disk_data: dict[str, DiskMetrics]) -> str:
                     f'Точка монтирования: {partition.mountpoint}\n'
                     f'Всего памяти: {bytes_to_gb(partition.total)} GB\n'
                     f'Использовано: {bytes_to_gb(partition.used)} GB | {round(partition.usage_percent, 2)} %\n'
-                    f'Свободно: {bytes_to_gb(partition.free)} GB| {round(100 - partition.usage_percent,2)} %\n\n')
+                    f'Свободно: {bytes_to_gb(partition.free)} GB | {round(100 - partition.usage_percent,2)} %\n\n')
         msg += '\n'
     return msg
 

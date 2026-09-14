@@ -21,7 +21,7 @@ def get_current_state(
         
         return previous_state
 
-def check_alert(value: float, previous_state: State, edwsr: Thresholds)-> MetricStatus:
+def check_alert(value: float, previous_state: State, threshold: Thresholds)-> MetricStatus:
     current_state = get_current_state(value=value, 
                                       previous_state=previous_state, 
                                       threshold=threshold)
