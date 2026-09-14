@@ -1,7 +1,12 @@
 import asyncio
 import logging
+from config import (MONITORING_INTERVAL, 
+                    CPU_THRESHOLDS, 
+                    RAM_THRESHOLDS, 
+                    DISK_THRESHOLDS, 
+                    MONITORED_CONTAINERS)
 
-from alerts.state_store import StateStore
+from alerts.state_store import StateStore, IncidentStore
 from alerts.states import Alert
 from alerts.models import Thresholds, NumericAlertData, ContainerAlertData
 from alerts.manager import check_alert, check_container_alert
@@ -11,59 +16,29 @@ from telegram.notifier import send_alert, send_container_alert
 
 logger = logging.getLogger(__name__)
 
-async def monitoring_loop(store: StateStore, bot, chat_id):
-    cpu_thresholds = Thresholds(
-        warning=85,
-        critical=95,
-        recovery=75
-    )
-    ram_thresholds = Thresholds(
-        warning=85,
-        critical=95,
-        recovery=80
-    )
-
-    disk_thresholds = {
-        'temperature_threshold' : Thresholds(
-        warning=65,
-        critical=75,
-        recovery=55
-    ),
-        'usage_threshold' : Thresholds(
-        warning=80,
-        critical=90,
-        recovery=75
-    )
-    }
-
-    monitored_containers = {
-        "immich_server",
-        "immich_postgres",
-        "immich_redis",
-        "vaultwarden"
-    }
-
+async def monitoring_loop(store: StateStore,incident: IncidentStore, bot, chat_id):
     while True:
         try:
-            await monitoring_cpu_temperature(store, bot, chat_id, cpu_thresholds)
+            await monitoring_cpu_temperature(store, bot, chat_id, CPU_THRESHOLDS)
         except Exception:
             logger.exception('CPU monitoring failed')
         try:
-            await monitoring_ram_usage(store, bot, chat_id, ram_thresholds)
+            await monitoring_ram_usage(store, bot, chat_id, RAM_THRESHOLDS)
         except Exception:
             logger.exception('RAM monitoring failed')
         try:
-            await monitoring_disk(store, bot, chat_id, disk_thresholds)
+            await monitoring_disk(store, bot, chat_id, DISK_THRESHOLDS)
         except Exception:
             logger.exception('Disks monitoring failed')
         try:
-            await monitoring_containers(store, bot, chat_id, monitored_containers)
+            await monitoring_containers(store,incident, bot, chat_id, MONITORED_CONTAINERS)
         except Exception:
             logger.exception('Containers monitoring is failed')
-        await asyncio.sleep(5)
+            
+        await asyncio.sleep(MONITORING_INTERVAL)
 
 
-async def monitoring_containers(store: StateStore, bot, chat_id, monitored_containers: set[str]):
+async def monitoring_containers(store: StateStore, incident: IncidentStore, bot, chat_id, monitored_containers: set[str]):
     containers = get_containers_health()
     logger.info('Containers monitor is begin')
 
@@ -76,6 +51,7 @@ async def monitoring_containers(store: StateStore, bot, chat_id, monitored_conta
                 container_status='missing',
                 container_health=None,
                 store=store,
+                incident=incident,
                 bot=bot,
                 chat_id=chat_id
             )
@@ -85,6 +61,7 @@ async def monitoring_containers(store: StateStore, bot, chat_id, monitored_conta
                 container_status=container_info.status,
                 container_health=container_info.health,
                 store=store,
+                incident=incident,
                 bot=bot,
                 chat_id=chat_id
             )
@@ -138,7 +115,7 @@ async def monitoring_disk(store: StateStore, bot, chat_id, threshold: dict[str, 
                 display_name='DISK ' + disk_name,
                 value=disk_info.temperature,
                 unit='°C',
-                threshold=threshold['temperature_threshold'],
+                threshold=threshold['temperature'],
                 store=store,
                 bot=bot,
                 chat_id=chat_id
@@ -153,7 +130,7 @@ async def monitoring_disk(store: StateStore, bot, chat_id, threshold: dict[str, 
                     display_name='Partition '+ partition.mountpoint,
                     value=partition.usage_percent,
                     unit='%',
-                    threshold=threshold['usage_threshold'],
+                    threshold=threshold['usage'],
                     store=store,
                     bot=bot,
                     chat_id=chat_id
@@ -164,6 +141,7 @@ async def docker_monitoring_metrics(
         container_status: str,
         container_health: str | None,
         store: StateStore,
+        incident: IncidentStore,
         bot,
         chat_id):
     
@@ -176,8 +154,12 @@ async def docker_monitoring_metrics(
         health=container_health,
         previous_state=previous_state
     )
-
+    downtime = None
     if status.alert != Alert.NO_ALERT:
+        if status.alert == Alert.CRITICAL:
+            incident.start(metric=metric_name)
+        if status.alert == Alert.RECOVERED:
+            downtime = incident.stop(metric_name)
         await send_container_alert(
             bot=bot,
             chat_id=chat_id,
@@ -185,10 +167,13 @@ async def docker_monitoring_metrics(
                 container_name: ContainerAlertData(
                         status=status,
                         container_status=container_status,
-                        container_health=container_health
+                        container_health=container_health,
+                        downtime=downtime
                     )
                 }
         )
+    if status.alert == Alert.RECOVERED:
+        incident.remove(metric=metric_name)
 
     store.set(metric=metric_name, state=status.state)
 

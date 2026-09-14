@@ -3,7 +3,7 @@ import asyncio
 
 from telegram.create_bot import bot, dp
 from telegram.handlers import start_router
-from alerts.state_store import StateStore
+from alerts.state_store import StateStore, IncidentStore
 from alerts.monitor import monitoring_loop
 from config import alert_chat_id
 
@@ -14,11 +14,12 @@ logging.basicConfig(
 
 async def main():
     store = StateStore()
+    incident = IncidentStore()
 
     dp.include_router(start_router)
 
     asyncio.create_task(
-        monitoring_loop(store, bot, chat_id=alert_chat_id)
+        monitoring_loop(store,incident, bot, chat_id=alert_chat_id)
     )
 
     await dp.start_polling(bot)

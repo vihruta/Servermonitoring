@@ -19,3 +19,4 @@ class ContainerAlertData(BaseModel):
     status: MetricStatus
     container_status: str
     container_health: str | None
+    downtime: float | None

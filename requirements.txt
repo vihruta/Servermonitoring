@@ -2,3 +2,4 @@ aiogram
 psutil
 python-dotenv
 docker
+pyaml

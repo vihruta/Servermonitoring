@@ -109,7 +109,24 @@ def format_container_alert(
                 f'Alert: {alert_data.status.alert.name}\n'
                 f'Статус: {alert_data.container_status}\n')
         if alert_data.container_health is not None:
-            msg += f'Health: {alert_data.container_health}'
-        
+            msg += f'Health: {alert_data.container_health}\n'
+        if alert_data.downtime is not None:
+            msg+= 'Инцидент продлился: '
+            msg += format_duration(seconds=alert_data.downtime)
+
+    return msg
+
+def format_duration(seconds: float) -> str:
+    seconds = int(seconds)
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    msg = ''
+
+    if hours:
+        msg += f'{hours} часов'
+    if minutes:
+        msg += f'{minutes} минут'
+    msg += f'{seconds} секунд'
 
     return msg

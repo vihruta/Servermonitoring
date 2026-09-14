@@ -1,4 +1,6 @@
+import time
 from alerts.states import State
+
 
 class StateStore:
     def __init__(self):
@@ -9,3 +11,20 @@ class StateStore:
 
     def set(self, metric: str, state: State):
         self.states[metric] = state
+
+class IncidentStore:
+    def __init__(self):
+        self.incidents: dict[str, float] = {}
+
+    def start(self, metric: str):
+        if metric not in self.incidents:
+            self.incidents[metric] = time.monotonic()
+
+    def get(self, metric: str) -> float | None:
+        return self.incidents[metric]
+    
+    def stop(self, metric: str):
+        return self.incidents[metric] - time.monotonic()
+
+    def remove(self, metric: str):
+        self.incidents.pop(metric)
