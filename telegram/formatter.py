@@ -1,5 +1,6 @@
 from models import CpuMetrics, MemoryMetrics, DiskMetrics, SystemStatus, DockerContainerMetrics
-from alerts.models import MetricStatus
+from alerts.models import MetricStatus, AlertData
+
 
 
 line_divider = '__________________________________\n'
@@ -86,13 +87,14 @@ def format_docker_data(docker_data: dict[str, DockerContainerMetrics]):
     return msg 
 
 def format_alert(
-        data: dict[str, tuple[MetricStatus, float]]
+        data: dict[str, AlertData]
         ) -> str:
     msg = 'ALERT\n'
-    for device, (status, temperature) in data.items():
+
+    for device, alert_data in data.items():
         msg += (f'{device}\n'
-                f'Alert: {status.alert.name}\n'
-                f'Температура: {temperature}')
+                f'Alert: {alert_data.status.alert.name}\n'
+                f'Значение: {alert_data.value} {alert_data.unit}')
     return msg
 
     

@@ -1,20 +1,31 @@
 from alerts.states import State, Alert
-from alerts.models import MetricStatus
+from alerts.models import MetricStatus, Thresholds
 
-def get_cpu_temp_state(temperature: float, previous_state: State) -> State:
-    if temperature < 80:
+def get_current_state(
+        value: float, 
+        previous_state: State, 
+        threshold: Thresholds
+        ) -> State:
+    if value < threshold.recovery:
         return State.OK
-    elif temperature >= 95:
+    
+    elif value >= threshold.critical:
         return State.CRITICAL
-    elif temperature >= 90:
+    
+    elif value >= threshold.warning:
         return State.WARNING
+    
     else:
-        if previous_state == State.OK or previous_state == State.WARNING:
-            return previous_state
-        return State.WARNING
+        if previous_state == State.CRITICAL:
+            return State.WARNING
+        
+        return previous_state
 
-def check_alert(temperature: float, previous_state: State)-> MetricStatus:
-    current_state = get_cpu_temp_state(temperature=temperature, previous_state=previous_state)
+def check_alert(value: float, previous_state: State, edwsr: Thresholds)-> MetricStatus:
+    current_state = get_current_state(value=value, 
+                                      previous_state=previous_state, 
+                                      threshold=threshold)
+                                      
     if current_state == State.OK:
         if previous_state == State.WARNING or previous_state == State.CRITICAL:
 
