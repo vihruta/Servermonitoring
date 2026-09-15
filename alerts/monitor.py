@@ -159,7 +159,7 @@ async def docker_monitoring_metrics(
         if status.alert == Alert.CRITICAL:
             incident.start(metric=metric_name)
         if status.alert == Alert.RECOVERED:
-            downtime = incident.stop(metric_name)
+            downtime = incident.get_downtime(metric_name)
         await send_container_alert(
             bot=bot,
             chat_id=chat_id,
@@ -172,8 +172,8 @@ async def docker_monitoring_metrics(
                     )
                 }
         )
-    if status.alert == Alert.RECOVERED:
-        incident.remove(metric=metric_name)
+        if status.alert == Alert.RECOVERED:
+            incident.remove(metric=metric_name)
 
     store.set(metric=metric_name, state=status.state)
 

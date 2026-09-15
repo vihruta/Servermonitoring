@@ -124,9 +124,9 @@ def format_duration(seconds: float) -> str:
     msg = ''
 
     if hours:
-        msg += f'{hours} часов'
+        msg += f'{hours} часов '
     if minutes:
-        msg += f'{minutes} минут'
+        msg += f'{minutes} минут '
     msg += f'{seconds} секунд'
 
     return msg
