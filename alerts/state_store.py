@@ -23,8 +23,13 @@ class IncidentStore:
     def get(self, metric: str) -> float | None:
         return self.incidents[metric]
     
-    def get_downtime(self, metric: str):
+    def get_downtime(self, metric: str) -> float | None:
+        started_at = self.incidents.get(metric)
+
+        if started_at is None:
+            return None
+        
         return time.monotonic() - self.incidents[metric]
 
     def remove(self, metric: str):
-        self.incidents.pop(metric)
+        self.incidents.pop(metric, None)
