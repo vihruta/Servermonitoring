@@ -1,5 +1,5 @@
 monitoring:
-  interval: 5
+  interval: 60
 
 thresholds:
   cpu:
@@ -29,7 +29,3 @@ docker:
   - immich_postgres
   - immich_redis
   - vaultwarden
-
-logger:
-  level: INFO
-  format: "%(levelname)s | %(name)s | %(message)s"

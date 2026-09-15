@@ -11,6 +11,7 @@ logging.basicConfig(
     level=LOGGING_LEVEL,
     format=LOGGING_FORMAT
 )
+
 logger = logging.getLogger(__name__)
 
 
