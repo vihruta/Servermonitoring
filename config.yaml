@@ -29,3 +29,7 @@ docker:
   - immich_postgres
   - immich_redis
   - vaultwarden
+
+logger:
+  level: INFO
+  format: "%(levelname)s | %(name)s | %(message)s"

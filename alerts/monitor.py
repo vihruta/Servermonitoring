@@ -17,6 +17,11 @@ from telegram.notifier import send_alert, send_container_alert
 logger = logging.getLogger(__name__)
 
 async def monitoring_loop(store: StateStore,incident: IncidentStore, bot, chat_id):
+    logger.info(
+        'Monitoring interval is %s seconds',
+        MONITORING_INTERVAL
+        )
+    
     while True:
         try:
             await monitoring_cpu_temperature(store, bot, chat_id, CPU_THRESHOLDS)
@@ -40,7 +45,7 @@ async def monitoring_loop(store: StateStore,incident: IncidentStore, bot, chat_i
 
 async def monitoring_containers(store: StateStore, incident: IncidentStore, bot, chat_id, monitored_containers: set[str]):
     containers = get_containers_health()
-    logger.info('Containers monitor is begin')
+    logger.debug('Containers monitor is begin')
 
     for container_name in monitored_containers:
         container_info = containers.get(container_name)
@@ -72,7 +77,12 @@ async def monitoring_cpu_temperature(store: StateStore, bot, chat_id, threshold:
     temperature = cpu_check().temperature
     if temperature is None:
         return None
-    logger.info('Cpu monitor is begin')
+    logger.debug('Cpu monitor is begin')
+    logger.debug(
+        'CPU temperature is %s',
+        temperature
+        )
+    
     await monitoring_metrics(
         metric_name='cpu_temperature',
         display_name='CPU',
@@ -87,8 +97,11 @@ async def monitoring_ram_usage(store: StateStore, bot, chat_id, threshold: Thres
     ram_usage_percent = ram_check().ram.usage
     if ram_usage_percent is None:
         return None
-    logger.info('Ram monitor is begin')
-    logger.info(f'Ram usage {ram_usage_percent}')
+    logger.debug('Ram monitor is begin')
+    logger.debug(
+        'Ram usage is %.1f%%',
+        ram_usage_percent)
+    
     await monitoring_metrics(
         metric_name='ram_usage',
         display_name='RAM',
@@ -104,12 +117,17 @@ async def monitoring_disk(store: StateStore, bot, chat_id, threshold: dict[str, 
     disks_dict = disk_check()
     if disks_dict is None:
         return None
-    logger.info('Disk monitor is begin')
+    logger.debug('Disk monitor is begin')
     for disk_name, disk_info in disks_dict.items():
         
         if disk_info.temperature is not None:
 
-            logger.info(f'DISK {disk_name} | temperature {disk_info.temperature}')
+            logger.debug(
+                'DISK %s temperature is %s °C',
+                disk_name, 
+                disk_info.temperature
+                )
+            
             await monitoring_metrics(
                 metric_name='disk_temperature_' + disk_name,
                 display_name='DISK ' + disk_name,
@@ -124,7 +142,10 @@ async def monitoring_disk(store: StateStore, bot, chat_id, threshold: dict[str, 
         for partition in disk_info.partitions:
             if partition.mountpoint != '/boot/efi':
 
-                logger.info(f'Partition {partition} | usage {partition.usage_percent}')
+                logger.debug('Partition %s usage is %.1f%%',
+                             partition.mountpoint,
+                             partition.usage_percent
+                             )
                 await monitoring_metrics(
                     metric_name='partition_usage_' + partition.partition,
                     display_name='Partition '+ partition.mountpoint,
@@ -158,8 +179,31 @@ async def docker_monitoring_metrics(
     if status.alert != Alert.NO_ALERT:
         if status.alert == Alert.CRITICAL:
             incident.start(metric=metric_name)
+            logger.error(
+                'Container %s: %s -> %s | docker_status=%s | health=%s',
+                container_name,
+                previous_state.name,
+                status.state.name,
+                container_status,
+                container_health
+            )
         if status.alert == Alert.RECOVERED:
             downtime = incident.get_downtime(metric_name)
+            logger.info(
+                'Container %s: %s -> %s | docker_status=%s | health=%s',
+                container_name,
+                previous_state.name,
+                status.state.name,
+                container_status,
+                container_health
+            )
+            if downtime is not None:
+                logger.info(
+                    'Container %s recovered after %.1f seconds',
+                    container_name,
+                    downtime
+                )
+
         await send_container_alert(
             bot=bot,
             chat_id=chat_id,
@@ -196,6 +240,15 @@ async def monitoring_metrics(
     )
 
     if status.alert != Alert.NO_ALERT:
+        if status.alert == Alert.CRITICAL:
+            logger.error(
+                '%s: %s -> %s | value=%.1f %s',
+                display_name,
+                previous_state.name,
+                status.state.name,
+                value,
+                unit
+            )
         await send_alert( 
             bot=bot, 
             chat_id=chat_id, 

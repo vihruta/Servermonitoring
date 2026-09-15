@@ -5,14 +5,17 @@ from telegram.create_bot import bot, dp
 from telegram.handlers import start_router
 from alerts.state_store import StateStore, IncidentStore
 from alerts.monitor import monitoring_loop
-from config import alert_chat_id
+from config import alert_chat_id, LOGGING_FORMAT, LOGGING_LEVEL
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s| %(levelname)s | %(name)s | %(message)s"
+    level=LOGGING_LEVEL,
+    format=LOGGING_FORMAT
 )
+logger = logging.getLogger(__name__)
+
 
 async def main():
+    logger.info('ServerMonitor is starting')
     store = StateStore()
     incident = IncidentStore()
 

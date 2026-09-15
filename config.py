@@ -6,8 +6,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 def load_monitoring_config(base_path: Path):
-    THRESHOLDS_PATH = base_path / "monitoring_config.yaml"
-    with THRESHOLDS_PATH.open('r', encoding='utf-8') as file:
+    CONFIG_PATH = base_path / "config.yaml"
+    with CONFIG_PATH.open('r', encoding='utf-8') as file:
         config_data = yaml.safe_load(file)
     monitoring_data = config_data['monitoring']
     cpu_data = config_data['thresholds']['cpu']
@@ -30,8 +30,19 @@ def load_monitoring_config(base_path: Path):
     return MONITORING_INTERVAL,CPU_THRESHOLDS, RAM_THRESHOLDS, DISK_THRESHOLDS, MONITORED_CONTAINERS
 
 
+def load_logger_config(base_path: Path):
+    CONFIG_PATH = base_path / "config.yaml"
+    with CONFIG_PATH.open('r', encoding='utf-8') as file:
+        config_data = yaml.safe_load(file)
+    logger_data = config_data['logger']
+    logging_level = logger_data['level']
+    logging_format = logger_data['format']
+
+    return logging_level, logging_format
+
 BASE_DIR = Path(__file__).resolve().parent
 
+LOGGING_LEVEL, LOGGING_FORMAT = load_logger_config(BASE_DIR)
 MONITORING_INTERVAL, CPU_THRESHOLDS, RAM_THRESHOLDS, DISK_THRESHOLDS, MONITORED_CONTAINERS = load_monitoring_config(base_path=BASE_DIR)
 
 if CPU_THRESHOLDS is None or RAM_THRESHOLDS is None or DISK_THRESHOLDS is None or MONITORED_CONTAINERS is None:
