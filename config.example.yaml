@@ -3,9 +3,14 @@ monitoring:
 
 thresholds:
   cpu:
-    warning: 85
-    critical: 95
-    recovery: 75
+    temperature:
+      warning: 85
+      critical: 95
+      recovery: 75
+    usage:
+      warning: 85
+      critical: 95
+      recovery: 75
   
   ram:
     warning: 85
@@ -32,4 +37,4 @@ docker:
 
 logger:
   level: INFO
-  format: %(levelname)s | %(name)s | %(message)s"
+  format: "%(levelname)s | %(name)s | %(message)s"

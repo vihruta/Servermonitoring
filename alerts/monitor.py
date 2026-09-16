@@ -1,7 +1,8 @@
 import asyncio
 import logging
 from config import (MONITORING_INTERVAL, 
-                    CPU_THRESHOLDS, 
+                    CPU_TEMPERATURE_THRESHOLDS,
+                    CPU_USAGE_THRESHOLD, 
                     RAM_THRESHOLDS, 
                     DISK_THRESHOLDS, 
                     MONITORED_CONTAINERS)
@@ -24,7 +25,13 @@ async def monitoring_loop(store: StateStore,incident: IncidentStore, bot, chat_i
     
     while True:
         try:
-            await monitoring_cpu_temperature(store, bot, chat_id, CPU_THRESHOLDS)
+            await monitoring_cpu(
+                store, 
+                bot, 
+                chat_id, 
+                CPU_TEMPERATURE_THRESHOLDS, 
+                CPU_USAGE_THRESHOLD
+                )
         except Exception:
             logger.exception('CPU monitoring failed')
         try:
@@ -43,75 +50,119 @@ async def monitoring_loop(store: StateStore,incident: IncidentStore, bot, chat_i
         await asyncio.sleep(MONITORING_INTERVAL)
 
 
-async def monitoring_containers(store: StateStore, incident: IncidentStore, bot, chat_id, monitored_containers: set[str]):
+async def monitoring_containers(
+        store: StateStore, 
+        incident: IncidentStore, 
+        bot, 
+        chat_id, 
+        monitored_containers: set[str]
+):
+    
     containers = get_containers_health()
+
     logger.debug('Containers monitor is begin')
-
+    if containers is None:
+        logger.warning('Docker data is unavailable')
+        return
+    
     for container_name in monitored_containers:
-        container_info = containers.get(container_name)
-
-        if container_info is None:
-            await docker_monitoring_metrics(
-                container_name=container_name,
-                container_status='missing',
-                container_health=None,
-                store=store,
-                incident=incident,
-                bot=bot,
-                chat_id=chat_id
-            )
+        if container_name not in containers:
+            container_status = 'missing'
+            container_health = None
         else:
-            await docker_monitoring_metrics(
-                container_name=container_name,
-                container_status=container_info.status,
-                container_health=container_info.health,
-                store=store,
-                incident=incident,
-                bot=bot,
-                chat_id=chat_id
-            )
+            container_info = containers.get(container_name)
+
+            if container_info is None:
+                logger.warning(
+                    'Container %s data is missing',
+                    container_name)
+                continue
+
+            container_status = container_info.status
+            container_health = container_info.health
+
+        await docker_monitoring_metrics(
+            container_name=container_name,
+            container_status=container_status,
+            container_health=container_health,
+            store=store,
+            incident=incident,
+            bot=bot,
+            chat_id=chat_id
+        )
+
         
 
 
-async def monitoring_cpu_temperature(store: StateStore, bot, chat_id, threshold: Thresholds):
-    temperature = cpu_check().temperature
-    if temperature is None:
-        return None
-    logger.debug('Cpu monitor is begin')
-    logger.debug(
-        'CPU temperature is %s',
-        temperature
-        )
-    
-    await monitoring_metrics(
-        metric_name='cpu_temperature',
-        display_name='CPU',
-        value=temperature,
-        unit='°C',
-        threshold=threshold,
-        store=store,
-        bot=bot,
-        chat_id=chat_id)
+async def monitoring_cpu(store: StateStore, 
+                         bot, 
+                         chat_id, 
+                         cpu_temperature_threshold: Thresholds,
+                         cpu_usage_thresholds: Thresholds):
 
-async def monitoring_ram_usage(store: StateStore, bot, chat_id, threshold: Thresholds):
-    ram_usage_percent = ram_check().ram.usage
-    if ram_usage_percent is None:
-        return None
-    logger.debug('Ram monitor is begin')
-    logger.debug(
-        'Ram usage is %.1f%%',
-        ram_usage_percent)
-    
-    await monitoring_metrics(
-        metric_name='ram_usage',
-        display_name='RAM',
-        value=ram_usage_percent,
-        unit='%',
-        threshold=threshold,
-        store=store,
-        bot=bot,
-        chat_id=chat_id
-    )
+    cpu_data = cpu_check()
+    if cpu_data is not None:
+        temperature = cpu_data.temperature
+        usage = cpu_data.usage_percent
+
+        if temperature is not None:
+            logger.debug('Cpu monitor is begin')
+            logger.debug(
+                'CPU temperature is %s',
+                temperature
+                )
+            
+            await monitoring_metrics(
+                metric_name='cpu_temperature',
+                display_name='CPU temperature',
+                value=temperature,
+                unit='°C',
+                threshold=cpu_temperature_threshold,
+                store=store,
+                bot=bot,
+                chat_id=chat_id)
+
+        if usage is not None:
+            logger.debug(
+                'CPU usage is %s',
+                usage
+                )
+
+            await monitoring_metrics(
+                metric_name='cpu_usage',
+                display_name='CPU usage',
+                value=usage,
+                unit='%',
+                threshold=cpu_usage_thresholds,
+                store=store,
+                bot=bot,
+                chat_id=chat_id)
+
+async def monitoring_ram_usage(
+        store: StateStore,
+        bot, chat_id,
+        threshold: Thresholds
+):
+    ram_data = ram_check()
+
+    if ram_data is not None and ram_data.ram.usage is not None:
+            
+            logger.debug('Ram monitor is begin')
+            logger.debug(
+                'Ram usage is %.1f%%',
+                ram_data.ram.usage
+                )
+            
+            await monitoring_metrics(
+                metric_name='ram_usage',
+                display_name='RAM',
+                value=ram_data.ram.usage,
+                unit='%',
+                threshold=threshold,
+                store=store,
+                bot=bot,
+                chat_id=chat_id
+            )
 
 async def monitoring_disk(store: StateStore, bot, chat_id, threshold: dict[str, Thresholds]):
     disks_dict = disk_check()

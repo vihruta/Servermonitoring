@@ -3,3 +3,5 @@ psutil
 python-dotenv
 docker
 pyaml
+pytest
+pytest-asyncio

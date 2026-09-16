@@ -45,8 +45,8 @@ class DockerContainerMetrics(BaseModel):
     health: str | None
 
 class SystemStatus(BaseModel):
-    uptime: float
-    cpu: CpuMetrics
-    memory: MemoryMetrics
-    disks: dict[str, DiskMetrics]
-    docker_containers: dict[str, DockerContainerMetrics]
+    uptime: float | None
+    cpu: CpuMetrics | None
+    memory: MemoryMetrics | None
+    disks: dict[str, DiskMetrics] | None
+    docker_containers: dict[str, DockerContainerMetrics | None] | None

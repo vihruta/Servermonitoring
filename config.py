@@ -7,27 +7,30 @@ from dotenv import load_dotenv
 
 def load_monitoring_config(base_path: Path):
     CONFIG_PATH = base_path / "config.yaml"
-    with CONFIG_PATH.open('r', encoding='utf-8') as file:
-        config_data = yaml.safe_load(file)
-    monitoring_data = config_data['monitoring']
-    cpu_data = config_data['thresholds']['cpu']
-    ram_data = config_data['thresholds']['ram']
-    disk_data = config_data['thresholds']['disk']
-    docker_data = config_data['docker']
+    try:
+        with CONFIG_PATH.open('r', encoding='utf-8') as file:
+            config_data = yaml.safe_load(file)
+        monitoring_data = config_data['monitoring']
+        cpu_data = config_data['thresholds']['cpu']
+        ram_data = config_data['thresholds']['ram']
+        disk_data = config_data['thresholds']['disk']
+        docker_data = config_data['docker']
 
-    MONITORING_INTERVAL = monitoring_data['interval']
-    CPU_THRESHOLDS = Thresholds(**cpu_data)
+        MONITORING_INTERVAL = monitoring_data['interval']
+        CPU_TEMPERATURE_THRESHOLDS = Thresholds(**cpu_data['temperature'])
+        CPU_USAGE_THRESHOLD = Thresholds(**cpu_data['usage'])
+        RAM_THRESHOLDS = Thresholds(**ram_data)
 
-    RAM_THRESHOLDS = Thresholds(**ram_data)
+        DISK_THRESHOLDS = {
+            'temperature': Thresholds(**disk_data['temperature']),
+            'usage': Thresholds(**disk_data['usage'])
+        }
 
-    DISK_THRESHOLDS = {
-        'temperature': Thresholds(**disk_data['temperature']),
-        'usage': Thresholds(**disk_data['usage'])
-    }
+        MONITORED_CONTAINERS = set(docker_data['monitored_containers'])
 
-    MONITORED_CONTAINERS = set(docker_data['monitored_containers'])
-
-    return MONITORING_INTERVAL,CPU_THRESHOLDS, RAM_THRESHOLDS, DISK_THRESHOLDS, MONITORED_CONTAINERS
+        return MONITORING_INTERVAL, CPU_TEMPERATURE_THRESHOLDS, CPU_USAGE_THRESHOLD, RAM_THRESHOLDS, DISK_THRESHOLDS, MONITORED_CONTAINERS
+    except Exception:
+        raise RuntimeError('Thresholds is not set')
 
 
 def load_logger_config(base_path: Path):
@@ -43,10 +46,8 @@ def load_logger_config(base_path: Path):
 BASE_DIR = Path(__file__).resolve().parent
 
 LOGGING_LEVEL, LOGGING_FORMAT = load_logger_config(BASE_DIR)
-MONITORING_INTERVAL, CPU_THRESHOLDS, RAM_THRESHOLDS, DISK_THRESHOLDS, MONITORED_CONTAINERS = load_monitoring_config(base_path=BASE_DIR)
+MONITORING_INTERVAL, CPU_TEMPERATURE_THRESHOLDS, CPU_USAGE_THRESHOLD, RAM_THRESHOLDS, DISK_THRESHOLDS, MONITORED_CONTAINERS = load_monitoring_config(base_path=BASE_DIR)
 
-if CPU_THRESHOLDS is None or RAM_THRESHOLDS is None or DISK_THRESHOLDS is None or MONITORED_CONTAINERS is None:
-    raise RuntimeError('Thresholds is not set')
 
 
 

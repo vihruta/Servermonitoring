@@ -2,7 +2,15 @@ import psutil
 import json
 import subprocess
 import time
-from models import CpuMetrics, LoadAverage, MemoryMetrics, RamMetrics, SwapMetrics, DiskMetrics, PartitionMetrics, SystemStatus
+import logging
+logger = logging.getLogger(__name__)
+
+
+from models import (CpuMetrics, LoadAverage, 
+                    MemoryMetrics, RamMetrics, 
+                    SwapMetrics, DiskMetrics, 
+                    PartitionMetrics, SystemStatus)
+
 from monitor.docker_monitor import get_containers_health
 
 cpu_therm = 'k10temp'
@@ -16,69 +24,81 @@ def get_status() -> SystemStatus:
         docker_containers=get_containers_health()
     )
 
-def cpu_check() -> CpuMetrics:
-    data = psutil.sensors_temperatures()
-    cpu_temp = data[cpu_therm][0].current
-    cpu_load = psutil.cpu_percent()
-    load_1, load_5, load_15 = psutil.getloadavg()
-    return CpuMetrics(
-        temperature=cpu_temp,
-        usage_percent=cpu_load,
-        load_average=LoadAverage(
-            min_1=load_1,
-            min_5=load_5,
-            min_15=load_15
-        )
-    )
-
-def ram_check() -> MemoryMetrics:
-    ram = psutil.virtual_memory()
-    ram_swap = psutil.swap_memory()
-    return MemoryMetrics(
-        ram=RamMetrics(
-            total=ram.total,
-            available=ram.available,
-            usage=ram.percent
-        ),
-        swap=SwapMetrics(
-            total=ram_swap.total,
-            used=ram_swap.used,
-            free=ram_swap.free,
-            usage=ram_swap.percent
-        )
-    )
-
-def disk_check() -> dict[str, DiskMetrics]:
-
-    disks = psutil.disk_partitions()
-
-    disk_dict: dict[str, DiskMetrics] = {}
-
-    for device in disks:
-
-        disk = get_parent_block(device.device)
-
-        if disk not in disk_dict:
-            disk_dict[disk] = DiskMetrics(
-                temperature=None,
-                partitions=[]
+def cpu_check() -> CpuMetrics | None:
+    try:
+        data = psutil.sensors_temperatures()
+        cpu_temp = data[cpu_therm][0].current
+        cpu_load = psutil.cpu_percent()
+        load_1, load_5, load_15 = psutil.getloadavg()
+        return CpuMetrics(
+            temperature=cpu_temp,
+            usage_percent=cpu_load,
+            load_average=LoadAverage(
+                min_1=load_1,
+                min_5=load_5,
+                min_15=load_15
             )
-
-        memory_info = psutil.disk_usage(device.mountpoint)
-        partition = PartitionMetrics(
-            partition=device.device,
-            mountpoint=device.mountpoint,
-            total=memory_info.total,
-            used=memory_info.used,
-            free=memory_info.free,
-            usage_percent=memory_info.percent
         )
-        disk_dict[disk].partitions.append(partition)
+    except Exception:
+        logger.exception('CPU check error')
+        return None
 
-    for disk, disk_data in disk_dict.items():
-        disk_data.temperature = get_disk_temp(disk)
+    
+def ram_check() -> MemoryMetrics | None:
+    try:
+        ram = psutil.virtual_memory()
+        ram_swap = psutil.swap_memory()
+        return MemoryMetrics(
+            ram=RamMetrics(
+                total=ram.total,
+                available=ram.available,
+                usage=ram.percent
+            ),
+            swap=SwapMetrics(
+                total=ram_swap.total,
+                used=ram_swap.used,
+                free=ram_swap.free,
+                usage=ram_swap.percent
+            )
+        )
+    except Exception:
+        logger.exception('RAM check error')
+        return None
 
-    return disk_dict
+def disk_check() -> dict[str, DiskMetrics] | None:
+    try:
+        disks = psutil.disk_partitions()
+
+        disk_dict: dict[str, DiskMetrics] = {}
+
+        for device in disks:
+
+            disk = get_parent_block(device.device)
+
+            if disk not in disk_dict:
+                disk_dict[disk] = DiskMetrics(
+                    temperature=None,
+                    partitions=[]
+                )
+
+            memory_info = psutil.disk_usage(device.mountpoint)
+            partition = PartitionMetrics(
+                partition=device.device,
+                mountpoint=device.mountpoint,
+                total=memory_info.total,
+                used=memory_info.used,
+                free=memory_info.free,
+                usage_percent=memory_info.percent
+            )
+            disk_dict[disk].partitions.append(partition)
+
+        for disk, disk_data in disk_dict.items():
+            disk_data.temperature = get_disk_temp(disk)
+
+        return disk_dict
+    except Exception:
+        logger.exception('Disk check error')
+        return None
 
 
 def get_disk_temp(drive_path: str) -> float | None:
@@ -103,6 +123,10 @@ def get_parent_block(drive_path: str) -> str:
     return disk
 
 def get_uptime():
-    boot_time = psutil.boot_time()
-    uptime_sec = time.time() - boot_time
-    return uptime_sec
+    try:
+        boot_time = psutil.boot_time()
+        uptime_sec = time.time() - boot_time
+        return uptime_sec
+    except Exception:
+        logger.exception('Get uptime error')
+        return None
