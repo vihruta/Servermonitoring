@@ -4,15 +4,12 @@ from aiogram.types import Message
 from monitor import system, docker_monitor
 import logging
 
-from telegram.formatter import format_cpu, format_ram, format_disk, format_status, format_temp, format_docker_data
-from telegram.filters import AllowedUserFilter
-from config import allowed_users
+from telegram.formatter import (format_cpu, format_ram, 
+                                format_disk, format_status, 
+                                format_temp, format_docker_data)
 
 start_router = Router()
 
-start_router.message.filter(
-    AllowedUserFilter(allowed_users)
-)
 logger = logging.getLogger(__name__)
 
 @start_router.message(Command('cpu'))

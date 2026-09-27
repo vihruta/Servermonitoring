@@ -1,11 +1,5 @@
 import asyncio
 import logging
-from config import (MONITORING_INTERVAL, 
-                    CPU_TEMPERATURE_THRESHOLDS,
-                    CPU_USAGE_THRESHOLD, 
-                    RAM_THRESHOLDS, 
-                    DISK_THRESHOLDS, 
-                    MONITORED_CONTAINERS)
 
 from alerts.state_store import StateStore, IncidentStore
 from alerts.states import Alert
@@ -14,13 +8,14 @@ from alerts.manager import check_alert, check_container_alert
 from monitor.system import cpu_check, ram_check, disk_check
 from monitor.docker_monitor import get_containers_health
 from telegram.notifier import send_alert, send_container_alert
+from config import Settings
 
 logger = logging.getLogger(__name__)
 
-async def monitoring_loop(store: StateStore,incident: IncidentStore, bot, chat_id):
+async def monitoring_loop(store: StateStore,incident: IncidentStore, bot, chat_id, settings: Settings):
     logger.info(
         'Monitoring interval is %s seconds',
-        MONITORING_INTERVAL
+        settings.monitoring.interval
         )
     
     while True:
@@ -29,25 +24,39 @@ async def monitoring_loop(store: StateStore,incident: IncidentStore, bot, chat_i
                 store, 
                 bot, 
                 chat_id, 
-                CPU_TEMPERATURE_THRESHOLDS, 
-                CPU_USAGE_THRESHOLD
+                settings.thresholds.cpu.temperature, 
+                settings.thresholds.cpu.usage
                 )
         except Exception:
             logger.exception('CPU monitoring failed')
         try:
-            await monitoring_ram_usage(store, bot, chat_id, RAM_THRESHOLDS)
+            await monitoring_ram_usage(store,
+                                       bot,
+                                       chat_id,
+                                       settings.thresholds.ram
+                )
         except Exception:
             logger.exception('RAM monitoring failed')
         try:
-            await monitoring_disk(store, bot, chat_id, DISK_THRESHOLDS)
+            await monitoring_disk(store,
+                                  bot,
+                                  chat_id, 
+                                  settings.thresholds.disk.temperature, 
+                                  settings.thresholds.disk.usage
+                )
         except Exception:
             logger.exception('Disks monitoring failed')
         try:
-            await monitoring_containers(store,incident, bot, chat_id, MONITORED_CONTAINERS)
+            await monitoring_containers(store,
+                                        incident,
+                                        bot,
+                                        chat_id,
+                                        settings.docker.monitored_containers
+                )
         except Exception:
             logger.exception('Containers monitoring is failed')
             
-        await asyncio.sleep(MONITORING_INTERVAL)
+        await asyncio.sleep(settings.monitoring.interval)
 
 
 async def monitoring_containers(
@@ -164,7 +173,8 @@ async def monitoring_ram_usage(
                 chat_id=chat_id
             )
 
-async def monitoring_disk(store: StateStore, bot, chat_id, threshold: dict[str, Thresholds]):
+async def monitoring_disk(store: StateStore, bot, chat_id, 
+                          temperature_threshold: Thresholds, usage_threshold: Thresholds):
     disks_dict = disk_check()
     if disks_dict is None:
         return None
@@ -184,7 +194,7 @@ async def monitoring_disk(store: StateStore, bot, chat_id, threshold: dict[str, 
                 display_name='DISK ' + disk_name,
                 value=disk_info.temperature,
                 unit='°C',
-                threshold=threshold['temperature'],
+                threshold=temperature_threshold,
                 store=store,
                 bot=bot,
                 chat_id=chat_id
@@ -202,7 +212,7 @@ async def monitoring_disk(store: StateStore, bot, chat_id, threshold: dict[str, 
                     display_name='Partition '+ partition.mountpoint,
                     value=partition.usage_percent,
                     unit='%',
-                    threshold=threshold['usage'],
+                    threshold=usage_threshold,
                     store=store,
                     bot=bot,
                     chat_id=chat_id

@@ -330,7 +330,8 @@ async def test_monitoring_disks(monkeypatch):
         store=store,
         bot=None,
         chat_id=123,
-        threshold=thresholds
+        temperature_threshold=thresholds['temperature'],
+        usage_threshold=thresholds['usage']
     )
 
     assert calls['disk_check'] == 1
@@ -409,7 +410,8 @@ async def test_monitoring_disks_temperature_unavailable(monkeypatch):
         store=store,
         bot=None,
         chat_id=123,
-        threshold=thresholds
+        temperature_threshold=thresholds['temperature'],
+        usage_threshold=thresholds['usage']
     )
 
     assert calls['disk_check'] == 1
@@ -486,7 +488,8 @@ async def test_monitoring_disks_efi_is_not_checking(monkeypatch):
         store=store,
         bot=None,
         chat_id=123,
-        threshold=thresholds
+        temperature_threshold=thresholds['temperature'],
+        usage_threshold=thresholds['usage']
     )
 
     assert calls['disk_check'] == 1
@@ -538,7 +541,8 @@ async def test_monitoring_disks_unavailable(monkeypatch):
         store=store,
         bot=None,
         chat_id=123,
-        threshold=thresholds
+        temperature_threshold=thresholds['temperature'],
+        usage_threshold=thresholds['usage']
     )
 
     assert metrics == []

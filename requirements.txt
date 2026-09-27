@@ -5,3 +5,4 @@ docker
 pyaml
 pytest
 pytest-asyncio
+pydantic_settings
