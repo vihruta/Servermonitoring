@@ -91,7 +91,7 @@ def test_format_status_with_unavailable_section(
 def test_format_docker():
     container_name_none = 'vaultwarden'
     container_name_good = 'immich'
-    error_str = f'Контейнер: {container_name_none}\nПри получение информации о контейнере возникла ошибка'
+    error_str = f'Контейнер: {container_name_none}\nПри получении информации о контейнере возникла ошибка'
     containers = {
         container_name_none: None,
         container_name_good :
