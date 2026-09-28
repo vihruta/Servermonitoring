@@ -6,8 +6,10 @@ from models import (CpuMetrics, LoadAverage,
                     SwapMetrics, DiskMetrics,
                     PartitionMetrics)
 import alerts.monitor as monitor
+import alerts.state_store as state_store
+
 from alerts.models import Thresholds
-from alerts.state_store import StateStore, IncidentStore
+from alerts.state_store import StateStore, IncidentStore, PendingStore, AlertCooldownStore
 from alerts.states import State, Alert
 
 
@@ -24,10 +26,14 @@ def test_monitoring_metrics(monkeypatch):
         )
 
     store = StateStore()
+    pending_timer = PendingStore()
+    cooldown = AlertCooldownStore()
     thresholds = Thresholds(
         warning=85,
         critical=95,
-        recovery=75
+        recovery=75,
+        warning_duration=0,
+        cooldown=60
     )
 
     async def run_scenario():
@@ -41,6 +47,8 @@ def test_monitoring_metrics(monkeypatch):
                 unit='%',
                 threshold=thresholds,
                 store=store,
+                pending_timer=pending_timer,
+                cooldown=cooldown,
                 bot=None,
                 chat_id=123
             )
@@ -59,6 +67,359 @@ def test_monitoring_metrics(monkeypatch):
     ]
 
     assert store.get('cpu_usage') == State.OK
+
+def test_monitoring_metrics_timer(monkeypatch):
+    sent_alerts = []
+    current_time = 0
+
+    async def fake_send_alert(bot, chat_id, status):
+        sent_alerts.append([status, current_time])
+    
+    def fake_pending_timer_duration() -> float:
+        return current_time
+    
+    monkeypatch.setattr(
+        monitor,
+        "send_alert",
+        fake_send_alert
+        )
+
+    monkeypatch.setattr(
+        state_store.time,
+        "monotonic",
+        fake_pending_timer_duration
+    )
+
+    store = StateStore()
+    pending_timer = PendingStore()
+    cooldown = AlertCooldownStore()
+    thresholds = Thresholds(
+        warning=85,
+        critical=95,
+        recovery=75,
+        warning_duration=120
+    )
+
+    async def run_scenario():
+        values = [70, 86, 86, 86]
+        nonlocal current_time
+        for value in values:
+            await monitor.monitoring_metrics(
+                metric_name='cpu_usage',
+                display_name='CPU usage',
+                value=value,
+                unit='%',
+                threshold=thresholds,
+                store=store,
+                pending_timer=pending_timer,
+                cooldown=cooldown,
+                bot=None,
+                chat_id=123
+            )
+            current_time += 60
+
+    asyncio.run(run_scenario())
+
+    alerts = [
+
+        [item[0]['CPU usage'].status.alert,
+         item[1]]
+        for item in sent_alerts
+    ]
+
+    assert alerts == [
+        [Alert.WARNING, 180]
+    ]
+
+def test_monitoring_metrics_timer_crit_warn_crit(monkeypatch):
+    sent_alerts = []
+    current_time = 0
+
+    async def fake_send_alert(bot, chat_id, status):
+        sent_alerts.append([status, current_time])
+    
+    def fake_pending_timer_duration() -> float:
+        return current_time
+    
+    monkeypatch.setattr(
+        monitor,
+        "send_alert",
+        fake_send_alert
+        )
+
+    monkeypatch.setattr(
+        state_store.time,
+        "monotonic",
+        fake_pending_timer_duration
+    )
+
+    store = StateStore()
+    pending_timer = PendingStore()
+    cooldown = AlertCooldownStore()
+    thresholds = Thresholds(
+        warning=85,
+        critical=95,
+        recovery=75,
+        warning_duration=120
+    )
+
+    async def run_scenario():
+        values = [96, 86, 96]
+        nonlocal current_time
+        for value in values:
+            await monitor.monitoring_metrics(
+                metric_name='cpu_usage',
+                display_name='CPU usage',
+                value=value,
+                unit='%',
+                threshold=thresholds,
+                store=store,
+                pending_timer=pending_timer,
+                cooldown=cooldown,
+                bot=None,
+                chat_id=123
+            )
+            current_time += 60
+
+    asyncio.run(run_scenario())
+
+    alerts = [
+
+        [item[0]['CPU usage'].status.alert,
+         item[1]]
+        for item in sent_alerts
+    ]
+
+    assert alerts == [
+        [Alert.CRITICAL, 0],
+        [Alert.CRITICAL, 120]
+    ]
+
+def test_short_warning_sends_no_alerts(monkeypatch):
+    sent_alerts = []
+    current_time = 0
+
+    async def fake_send_alert(bot, chat_id, status):
+        sent_alerts.append([status, current_time])
+    
+    def fake_pending_timer_duration() -> float:
+        return current_time
+    
+    monkeypatch.setattr(
+        monitor,
+        "send_alert",
+        fake_send_alert
+        )
+
+    monkeypatch.setattr(
+        state_store.time,
+        "monotonic",
+        fake_pending_timer_duration
+    )
+
+    store = StateStore()
+    pending_timer = PendingStore()
+    cooldown = AlertCooldownStore()
+    thresholds = Thresholds(
+        warning=85,
+        critical=95,
+        recovery=75,
+        warning_duration=120
+    )
+
+    async def run_scenario():
+        values = [70, 86, 86, 70, 86, 83, 90]
+        nonlocal current_time
+        for value in values:
+            await monitor.monitoring_metrics(
+                metric_name='cpu_usage',
+                display_name='CPU usage',
+                value=value,
+                unit='%',
+                threshold=thresholds,
+                store=store,
+                pending_timer=pending_timer,
+                cooldown=cooldown,
+                bot=None,
+                chat_id=123
+            )
+            current_time += 60
+
+    asyncio.run(run_scenario())
+
+    alerts = [
+
+        [item[0]['CPU usage'].status.alert,
+         item[1]]
+        for item in sent_alerts
+    ]
+
+    assert len(alerts) == 0
+
+
+def test_warning_timer_restarts_after_normalization(monkeypatch):
+    sent_alerts = []
+    current_time = 0
+
+    async def fake_send_alert(bot, chat_id, status):
+        sent_alerts.append([status, current_time])
+    
+    def fake_pending_timer_duration() -> float:
+        return current_time
+    
+    monkeypatch.setattr(
+        monitor,
+        "send_alert",
+        fake_send_alert
+        )
+
+    monkeypatch.setattr(
+        state_store.time,
+        "monotonic",
+        fake_pending_timer_duration
+    )
+
+    store = StateStore()
+    pending_timer = PendingStore()
+    cooldown = AlertCooldownStore()
+    thresholds = Thresholds(
+        warning=85,
+        critical=95,
+        recovery=75,
+        warning_duration=120
+    )
+
+    async def run_scenario():
+        values = [70, 86, 86, 70, 86, 85, 90]
+        nonlocal current_time
+        for value in values:
+            await monitor.monitoring_metrics(
+                metric_name='cpu_usage',
+                display_name='CPU usage',
+                value=value,
+                unit='%',
+                threshold=thresholds,
+                store=store,
+                pending_timer=pending_timer,
+                cooldown=cooldown,
+                bot=None,
+                chat_id=123
+            )
+            current_time += 60
+
+    asyncio.run(run_scenario())
+
+    alerts = [
+
+        [item[0]['CPU usage'].status.alert,
+         item[1]]
+        for item in sent_alerts
+    ]
+
+    assert alerts == [
+        [Alert.WARNING, 360]
+    ]
+
+@pytest.mark.asyncio
+async def test_numeric_cooldown_restarts_after_repeat(monkeypatch):
+    sent_alerts = []
+    current_time = 0.0
+
+    def fake_monotonic():
+        return current_time
+
+    async def fake_send_alert(bot, chat_id, status):
+        sent_alerts.append(
+            (status["CPU usage"].status.alert, current_time)
+        )
+
+    monkeypatch.setattr(state_store.time, "monotonic", fake_monotonic)
+    monkeypatch.setattr(monitor, "send_alert", fake_send_alert)
+
+    store = StateStore()
+    pending_timer = PendingStore()
+    cooldown = AlertCooldownStore()
+    thresholds = Thresholds(
+        warning=85,
+        critical=95,
+        recovery=75,
+        warning_duration=0,
+        cooldown=120,
+    )
+
+    for moment in [0, 119, 120, 121, 239, 240]:
+        current_time = moment
+
+        await monitor.monitoring_metrics(
+            metric_name="cpu_usage",
+            display_name="CPU usage",
+            value=90,
+            unit="%",
+            threshold=thresholds,
+            store=store,
+            pending_timer=pending_timer,
+            cooldown=cooldown,
+            bot=None,
+            chat_id=123,
+        )
+
+    assert sent_alerts == [
+        (Alert.WARNING, 0),
+        (Alert.WARNING, 120),
+        (Alert.WARNING, 240),
+    ]
+    assert store.get("cpu_usage") == State.WARNING
+
+@pytest.mark.asyncio
+async def test_critical_interrupts_pending_warning(monkeypatch):
+    sent_alerts = []
+    current_time = 0.0
+
+    def fake_monotonic():
+        return current_time
+
+    async def fake_send_alert(bot, chat_id, status):
+        sent_alerts.append(
+            (status["CPU usage"].status.alert, current_time)
+        )
+
+    monkeypatch.setattr(state_store.time, "monotonic", fake_monotonic)
+    monkeypatch.setattr(monitor, "send_alert", fake_send_alert)
+
+    store = StateStore()
+    pending_timer = PendingStore()
+    cooldown = AlertCooldownStore()
+    thresholds = Thresholds(
+        warning=85,
+        critical=95,
+        recovery=75,
+        warning_duration=120,
+        cooldown=300,
+    )
+
+    for moment, value in [(0, 86), (60, 96)]:
+        current_time = moment
+
+        await monitor.monitoring_metrics(
+            metric_name="cpu_usage",
+            display_name="CPU usage",
+            value=value,
+            unit="%",
+            threshold=thresholds,
+            store=store,
+            pending_timer=pending_timer,
+            cooldown=cooldown,
+            bot=None,
+            chat_id=123,
+        )
+
+        if moment == 0:
+            assert sent_alerts == []
+            assert store.get("cpu_usage") == State.OK
+
+    assert sent_alerts == [(Alert.CRITICAL, 60)]
+    assert store.get("cpu_usage") == State.CRITICAL
+    assert pending_timer.get("cpu_usage", State.WARNING) is None
 
 
 @pytest.mark.asyncio
@@ -84,14 +445,19 @@ async def test_monitoring_cpu_no_cpu_data(monkeypatch):
     )
     
     store = StateStore()
+    pending_timer = PendingStore()
+    cooldown = AlertCooldownStore()
     thresholds = Thresholds(
         warning=85,
         critical=95,
-        recovery=75
+        recovery=75,
+        warning_duration=120
     )
 
     await monitor.monitoring_cpu(
         store=store,
+        pending_timer=pending_timer,
+        cooldown=cooldown,
         bot=None,
         chat_id=123,
         cpu_temperature_threshold=thresholds,
@@ -130,6 +496,8 @@ async def test_monitoring_cpu(monkeypatch):
         unit: str,
         threshold: Thresholds,
         store: StateStore,
+        pending_timer: PendingStore,
+        cooldown: AlertCooldownStore,
         bot,
         chat_id,
         ):
@@ -141,14 +509,19 @@ async def test_monitoring_cpu(monkeypatch):
 
 
     store = StateStore()
+    pending_timer = PendingStore()
+    cooldown = AlertCooldownStore()
     thresholds = Thresholds(
         warning=85,
         critical=95,
-        recovery=75
+        recovery=75,
+        warning_duration=120
     )
 
     await monitor.monitoring_cpu(
         store=store,
+        pending_timer=pending_timer,
+        cooldown=cooldown,
         bot=None,
         chat_id=123,
         cpu_temperature_threshold=thresholds,
@@ -188,6 +561,8 @@ async def test_monitoring_ram(monkeypatch):
         unit: str,
         threshold: Thresholds,
         store: StateStore,
+        pending_timer: PendingStore,
+        cooldown: AlertCooldownStore,
         bot,
         chat_id,
     ):
@@ -206,14 +581,19 @@ async def test_monitoring_ram(monkeypatch):
         )
 
     store = StateStore()
+    pending_timer = PendingStore()
+    cooldown = AlertCooldownStore()
     thresholds = Thresholds(
         warning=85,
         critical=95,
-        recovery=75
+        recovery=75,
+        warning_duration=120
     )
 
     await monitor.monitoring_ram_usage(
-        store=store, 
+        store=store,
+        pending_timer=pending_timer,
+        cooldown=cooldown,
         bot=None, 
         chat_id=None, 
         threshold=thresholds
@@ -246,14 +626,19 @@ async def test_monitoring_ram_unavailable(monkeypatch):
     )
 
     store = StateStore()
+    pending_timer = PendingStore()
+    cooldown = AlertCooldownStore()
     thresholds = Thresholds(
         warning=85,
         critical=95,
-        recovery=75
+        recovery=75,
+        warning_duration=120
     )
 
     await monitor.monitoring_ram_usage(
         store=store,
+        pending_timer=pending_timer,
+        cooldown=cooldown,
         bot=None,
         chat_id=123,
         threshold=thresholds
@@ -293,6 +678,8 @@ async def test_monitoring_disks(monkeypatch):
             unit: str,
             threshold: Thresholds,
             store: StateStore,
+            pending_timer: PendingStore,
+            cooldown: AlertCooldownStore,
             bot,
             chat_id,
             ):
@@ -312,22 +699,28 @@ async def test_monitoring_disks(monkeypatch):
     )
 
     store = StateStore()
+    pending_timer = PendingStore()
+    cooldown = AlertCooldownStore()
     thresholds = {
         'temperature': Thresholds(
             warning=85,
             critical=95,
-            recovery=75
+            recovery=75,
+            warning_duration=120
             ),
         'usage': Thresholds(
             warning=85,
             critical=95,
-            recovery=75
+            recovery=75,
+            warning_duration=120
         )
     }
 
 
     await monitor.monitoring_disk(
         store=store,
+        pending_timer=pending_timer,
+        cooldown=cooldown,
         bot=None,
         chat_id=123,
         temperature_threshold=thresholds['temperature'],
@@ -373,6 +766,8 @@ async def test_monitoring_disks_temperature_unavailable(monkeypatch):
             unit: str,
             threshold: Thresholds,
             store: StateStore,
+            pending_timer: PendingStore,
+            cooldown: AlertCooldownStore,
             bot,
             chat_id,
             ):
@@ -392,22 +787,28 @@ async def test_monitoring_disks_temperature_unavailable(monkeypatch):
     )
 
     store = StateStore()
+    pending_timer = PendingStore()
+    cooldown = AlertCooldownStore()
     thresholds = {
         'temperature': Thresholds(
             warning=85,
             critical=95,
-            recovery=75
+            recovery=75,
+            warning_duration=120
             ),
         'usage': Thresholds(
             warning=85,
             critical=95,
-            recovery=75
+            recovery=75,
+            warning_duration=120
         )
     }
 
 
     await monitor.monitoring_disk(
         store=store,
+        pending_timer=pending_timer,
+        cooldown=cooldown,
         bot=None,
         chat_id=123,
         temperature_threshold=thresholds['temperature'],
@@ -451,6 +852,8 @@ async def test_monitoring_disks_efi_is_not_checking(monkeypatch):
             unit: str,
             threshold: Thresholds,
             store: StateStore,
+            pending_timer: PendingStore,
+            cooldown: AlertCooldownStore,
             bot,
             chat_id,
             ):
@@ -470,22 +873,28 @@ async def test_monitoring_disks_efi_is_not_checking(monkeypatch):
     )
 
     store = StateStore()
+    pending_timer = PendingStore()
+    cooldown = AlertCooldownStore()
     thresholds = {
         'temperature': Thresholds(
             warning=85,
             critical=95,
-            recovery=75
+            recovery=75,
+            warning_duration=120
             ),
         'usage': Thresholds(
             warning=85,
             critical=95,
-            recovery=75
+            recovery=75,
+            warning_duration=120
         )
     }
 
 
     await monitor.monitoring_disk(
         store=store,
+        pending_timer=pending_timer,
+        cooldown=cooldown,
         bot=None,
         chat_id=123,
         temperature_threshold=thresholds['temperature'],
@@ -523,22 +932,28 @@ async def test_monitoring_disks_unavailable(monkeypatch):
     )
 
     store = StateStore()
+    pending_timer = PendingStore()
+    cooldown = AlertCooldownStore()
     thresholds = {
         'temperature': Thresholds(
             warning=85,
             critical=95,
-            recovery=75
+            recovery=75,
+            warning_duration=120
             ),
         'usage': Thresholds(
             warning=85,
             critical=95,
-            recovery=75
+            recovery=75,
+            warning_duration=120
         )
     }
 
 
     await monitor.monitoring_disk(
         store=store,
+        pending_timer=pending_timer,
+        cooldown=cooldown,
         bot=None,
         chat_id=123,
         temperature_threshold=thresholds['temperature'],
@@ -573,13 +988,16 @@ async def test_docker_monitoring_container_unavailable(monkeypatch):
     monitored_containers = ('abc', 'bcd', 'edf')
     store = StateStore()
     incident = IncidentStore()
+    cooldown_timer = AlertCooldownStore()
 
     await monitor.monitoring_containers(
         store=store,
         incident=incident,
+        cooldown_timer=cooldown_timer,
         bot=None,
         chat_id=123,
-        monitored_containers=monitored_containers
+        monitored_containers=monitored_containers,
+        cooldown=0
     )
 
     assert sent_alerts == []
@@ -609,13 +1027,16 @@ async def test_docker_monitoring_container_is_missing(monkeypatch):
     monitored_containers = {'abc'}
     store = StateStore()
     incident = IncidentStore()
+    cooldown_timer = AlertCooldownStore()
 
     await monitor.monitoring_containers(
         store=store,
         incident=incident,
+        cooldown_timer=cooldown_timer,
         bot=None,
         chat_id=123,
-        monitored_containers=monitored_containers
+        monitored_containers=monitored_containers,
+        cooldown=0
     )
 
     assert sent_alerts[0]['abc'].status.alert == Alert.CRITICAL
@@ -645,13 +1066,16 @@ async def test_docker_container_get_no_info(monkeypatch):
     monitored_containers = {'abc'}
     store = StateStore()
     incident = IncidentStore()
+    cooldown_timer = AlertCooldownStore()
 
     await monitor.monitoring_containers(
         store=store,
         incident=incident,
+        cooldown_timer=cooldown_timer,
         bot=None,
         chat_id=123,
-        monitored_containers=monitored_containers
+        monitored_containers=monitored_containers,
+        cooldown=0
     )
 
     assert sent_alerts == []
@@ -660,7 +1084,6 @@ async def test_docker_container_get_no_info(monkeypatch):
 @pytest.mark.asyncio
 async def test_docker_container_lifecycle(monkeypatch):
     sent_alerts = []
-
     async def fake_send_container_alert(
         bot,
         chat_id,
@@ -676,10 +1099,10 @@ async def test_docker_container_lifecycle(monkeypatch):
 
     store = StateStore()
     incident = IncidentStore()
+    cooldown_timer = AlertCooldownStore()
 
     container_statuses = [
         "running",
-        "exited",
         "exited",
         "running",
     ]
@@ -691,6 +1114,8 @@ async def test_docker_container_lifecycle(monkeypatch):
             container_health=None,
             store=store,
             incident=incident,
+            cooldown_timer=cooldown_timer,
+            cooldown=0,
             bot=None,
             chat_id=123,
         )
@@ -715,3 +1140,131 @@ async def test_docker_container_lifecycle(monkeypatch):
         incident.get_downtime("docker_vaultwarden")
         is None
     )
+
+
+@pytest.mark.asyncio
+async def test_docker_monitoring_cooldown(monkeypatch):
+    sent_alerts = []
+    current_time = 0
+
+    async def fake_send_container_alert(
+        bot,
+        chat_id,
+        status,
+    ):
+        sent_alerts.append([status, current_time])
+
+    monkeypatch.setattr(
+        monitor,
+        "send_container_alert",
+        fake_send_container_alert,
+    )
+    
+    def fake_monotonic():
+        return current_time
+
+    monkeypatch.setattr(
+        state_store.time,
+        "monotonic",
+        fake_monotonic
+    )
+
+    store = StateStore()
+    incident = IncidentStore()
+    cooldown_timer = AlertCooldownStore()
+
+    container_statuses = [
+        "running",
+        "exited",
+        "exited",
+        "exited",
+        "running",
+    ]
+    cooldown = 70
+
+    for container_status in container_statuses:
+        await monitor.docker_monitoring_metrics(
+            container_name="vaultwarden",
+            container_status=container_status,
+            container_health=None,
+            store=store,
+            cooldown_timer= cooldown_timer,
+            cooldown = cooldown,
+            incident=incident,
+            bot=None,
+            chat_id=123,
+        )
+        current_time += 60
+
+    assert len(sent_alerts) == 3
+
+    alerts = [
+        (item[0]["vaultwarden"], item[1])
+        for item in sent_alerts
+    ]
+
+    assert alerts[0][0].status.alert == Alert.CRITICAL
+    assert alerts[0][0].container_status == "exited"
+    assert alerts[0][0].downtime is None
+    assert alerts[0][1] == 60
+
+    assert alerts[1][0].status.alert == Alert.CRITICAL
+    assert alerts[1][0].container_status == "exited"
+    assert alerts[1][0].downtime is None
+    assert alerts[1][1] == 180
+
+    assert alerts[2][0].status.alert == Alert.RECOVERED
+    assert alerts[2][0].container_status == "running"
+    assert alerts[2][0].downtime is not None
+    assert alerts[2][1] == 240
+    
+    assert store.get("docker_vaultwarden") == State.OK
+
+    recovery = sent_alerts[-1][0]["vaultwarden"]
+    assert recovery.downtime == 180
+
+def test_pending_store_preserves_start_time(monkeypatch):
+    current_time = 100.0
+
+    def fake_monotonic():
+        return current_time
+
+    monkeypatch.setattr(
+        state_store.time,
+        "monotonic",
+        fake_monotonic
+    )
+    store = state_store.PendingStore()
+    store.start(
+        metric='cpu',
+        state=State.WARNING)
+    
+    current_time = 130.0
+
+    store.start(
+        metric='cpu',
+        state=State.WARNING)
+
+    current_time = 150.0
+    store.start(
+        metric='cpu',
+        state=State.WARNING)
+
+    duration = store.get(metric='cpu', state=State.WARNING)
+    
+    assert duration == 50
+
+
+def test_pending_store_remove_metric():
+    store = state_store.PendingStore()
+
+    store.start(
+        metric='cpu',
+        state=State.WARNING
+    )
+
+    assert store.get(metric='cpu', state=State.WARNING) is not None
+
+    store.remove(metric='cpu')
+
+    assert store.get(metric='cpu', state=State.WARNING) is None

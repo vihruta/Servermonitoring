@@ -1,5 +1,6 @@
 from alerts.states import State, Alert
 from alerts.models import MetricStatus, Thresholds
+from alerts.state_store import AlertCooldownStore
 
 def get_current_state(
         value: float, 
@@ -75,3 +76,20 @@ def check_state_transition(current_state: State, previous_state: State) -> Metri
             return MetricStatus(alert=Alert.CRITICAL, state=current_state)
 
     return MetricStatus(alert=Alert.NO_ALERT, state=current_state)
+
+
+def check_cooldown(status: MetricStatus,
+                   metric_name: str,
+                   cooldown_timer: AlertCooldownStore, 
+                   cooldown: float) -> Alert:
+    
+    if status.alert == Alert.NO_ALERT and status.state in (State.WARNING, State.CRITICAL):
+        if cooldown_timer.check(
+            metric=metric_name,
+            metric_cooldown=cooldown
+        ):
+            if status.state == State.WARNING:
+                return Alert.WARNING
+            elif status.state == State.CRITICAL:
+                return Alert.CRITICAL
+    return status.alert

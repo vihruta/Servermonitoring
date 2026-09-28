@@ -2,12 +2,12 @@ import os
 import yaml
 from alerts.models import Thresholds
 from pathlib import Path
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from dotenv import load_dotenv
 
 class MonitoringSettings(BaseModel):
-    interval: int
+    interval: int = Field(default=60, gt=0)
 
 class LoggerSettings(BaseModel):
     level: str
@@ -15,6 +15,7 @@ class LoggerSettings(BaseModel):
 
 class DockerSettings(BaseModel):
     monitored_containers: set[str]
+    cooldown: int = Field(default=600, ge=0)
 
 class TelegramSettings(BaseModel):
     token: str
@@ -47,6 +48,16 @@ def get_yaml_config(base_path: Path):
     config_path = base_path / "config.yaml"
     with config_path.open('r', encoding='utf-8') as file:
         yaml_data = yaml.safe_load(file)
+
+    if yaml_data is None:
+        raise ValueError(f"Файл конфигурации {config_path} пуст или содержит null")
+
+    if not isinstance(yaml_data, dict):
+        raise ValueError(
+            f"В файле {config_path} ожидаются разделы с настройками, "
+            "а не список или одиночное значение"
+        )
+
     return yaml_data
     
 

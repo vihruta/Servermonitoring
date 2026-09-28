@@ -3,7 +3,7 @@ import asyncio
 from pathlib import Path
 from telegram.create_bot import create_bot
 from telegram.handlers import start_router
-from alerts.state_store import StateStore, IncidentStore
+from alerts.state_store import AlertCooldownStore, StateStore, IncidentStore, PendingStore
 from alerts.monitor import monitoring_loop
 from telegram.filters import AllowedUserFilter
 
@@ -21,8 +21,10 @@ async def main():
     logger = logging.getLogger(__name__)
 
     logger.info('ServerMonitor is starting')
+    cooldown = AlertCooldownStore()
     store = StateStore()
     incident = IncidentStore()
+    pending_timer = PendingStore()
     bot, dp = create_bot(settings.telegram.token)
 
     start_router.message.filter(
@@ -32,7 +34,11 @@ async def main():
     dp.include_router(start_router)
 
     asyncio.create_task(
-        monitoring_loop(store,incident, bot, 
+        monitoring_loop(store,
+                        cooldown,
+                        incident,
+                        pending_timer, 
+                        bot, 
                         chat_id=settings.telegram.alert_chat_id, 
                         settings=settings
         )

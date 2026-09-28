@@ -18,7 +18,7 @@ def get_containers_health() -> dict[str, DockerContainerMetrics | None] | None:
             containers[container.name] = check_health(container)
         return containers
     except Exception:
-        logger.error('Error while trying get containers')
+        logger.exception('Error while trying get containers')
         return None
 
 

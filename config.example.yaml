@@ -7,26 +7,37 @@ thresholds:
       warning: 85
       critical: 95
       recovery: 75
+      warning_duration: 120
+      cooldown: 300
+
     usage:
       warning: 85
       critical: 95
       recovery: 75
+      warning_duration: 120
+      cooldown: 300
   
   ram:
     warning: 85
     critical: 95
     recovery: 80
+    warning_duration: 120
+    cooldown: 300
 
   disk:
     temperature:
       warning: 65
       critical: 75
       recovery: 55
+      warning_duration: 120
+      cooldown: 36000
 
     usage:
       warning: 80
       critical: 90
       recovery: 75
+      warning_duration: 120
+      cooldown: 36000
 
 docker:
   monitored_containers:
@@ -34,6 +45,7 @@ docker:
   - immich_postgres
   - immich_redis
   - vaultwarden
+  cooldown: 6000
 
 logger:
   level: INFO
