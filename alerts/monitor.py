@@ -58,7 +58,9 @@ async def monitoring_loop(
                                   bot,
                                   chat_id, 
                                   settings.thresholds.disk.temperature, 
-                                  settings.thresholds.disk.usage
+                                  settings.thresholds.disk.usage,
+                                  lsblk_timeout=settings.timeouts.lsblk,
+                                  smartctl_timeout=settings.timeouts.smartctl
                 )
         except Exception:
             logger.exception('Disks monitoring failed')
@@ -70,7 +72,8 @@ async def monitoring_loop(
                                         bot,
                                         chat_id,
                                         settings.docker.monitored_containers,
-                                        settings.docker.cooldown
+                                        settings.docker.cooldown,
+                                        settings.timeouts.docker
                 )
         except Exception:
             logger.exception('Containers monitoring is failed')
@@ -86,10 +89,14 @@ async def monitoring_containers(
         bot, 
         chat_id, 
         monitored_containers: set[str],
-        cooldown: float
+        cooldown: float,
+        docker_timeout: int
 ):
     
-    containers = get_containers_health()
+    containers = await asyncio.to_thread(
+        get_containers_health,
+        docker_timeout=docker_timeout
+    )
 
     logger.debug('Containers monitor is begin')
     if containers is None:
@@ -139,8 +146,8 @@ async def monitoring_cpu(store: StateStore,
     if cpu_data is not None:
         temperature = cpu_data.temperature
         usage = cpu_data.usage_percent
-
         logger.debug('Cpu monitor is begin')
+        
         logger.debug(
             'CPU temperature is %s',
             temperature
@@ -211,8 +218,14 @@ async def monitoring_disk(store: StateStore,
                           bot, 
                           chat_id, 
                           temperature_threshold: Thresholds, 
-                          usage_threshold: Thresholds):
-    disks_dict = disk_check()
+                          usage_threshold: Thresholds,
+                          lsblk_timeout: float,
+                          smartctl_timeout: float):
+    disks_dict = await asyncio.to_thread(
+        disk_check,
+        lsblk_timeout=lsblk_timeout,
+        smartctl_timeout=smartctl_timeout
+    )
     if disks_dict is None:
         return None
     logger.debug('Disk monitor is begin')

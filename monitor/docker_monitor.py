@@ -6,9 +6,10 @@ from models import DockerContainerMetrics
 
 logger = logging.getLogger(__name__)
 
-def get_containers_health() -> dict[str, DockerContainerMetrics | None] | None:
+def get_containers_health(docker_timeout: int) -> dict[str, DockerContainerMetrics | None] | None:
+    client = None
     try:
-        client = docker.from_env()
+        client = docker.from_env(timeout=docker_timeout)
         containers_list = client.containers.list(all=True)
 
         containers: dict[str, DockerContainerMetrics | None] =  {}
@@ -17,9 +18,15 @@ def get_containers_health() -> dict[str, DockerContainerMetrics | None] | None:
                 continue
             containers[container.name] = check_health(container)
         return containers
+    except TimeoutError:
+        logger.exception('Timeout while get containers')
+        return None
     except Exception:
         logger.exception('Error while trying get containers')
         return None
+    finally:
+        if client is not None:
+            client.close()
 
 
 def check_health(container: Container) ->  DockerContainerMetrics | None:

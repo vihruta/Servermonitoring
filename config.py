@@ -35,12 +35,18 @@ class ThresholdSettings(BaseModel):
     disk: DiskThresholds
     ram: Thresholds
 
+class TimeOutSettings(BaseModel):
+    smartctl: int = Field(default=10, gt=0)
+    lsblk: int = Field(default=5, gt=0)
+    docker: int = Field(default=10, gt=0)
+
 class Settings(BaseModel):
     monitoring: MonitoringSettings
     logger: LoggerSettings
     docker: DockerSettings
     telegram: TelegramSettings
     thresholds: ThresholdSettings
+    timeouts: TimeOutSettings
 
 
 

@@ -3,6 +3,7 @@ import json
 import subprocess
 import time
 import logging
+import asyncio
 logger = logging.getLogger(__name__)
 
 
@@ -12,16 +13,22 @@ from models import (CpuMetrics, LoadAverage,
                     PartitionMetrics, SystemStatus)
 
 from monitor.docker_monitor import get_containers_health
+from config import Settings
 
 cpu_therm = 'k10temp'
 
-def get_status() -> SystemStatus:
+def get_status(settings: Settings) -> SystemStatus:
     return SystemStatus(
         uptime=get_uptime(),
         cpu=cpu_check(),
         memory=ram_check(),
-        disks=disk_check(),
-        docker_containers=get_containers_health()
+        disks= disk_check(
+            lsblk_timeout=settings.timeouts.lsblk,
+            smartctl_timeout=settings.timeouts.smartctl
+        ),
+        docker_containers=get_containers_health(
+            docker_timeout=settings.timeouts.docker
+        )
     )
 
 def cpu_check() -> CpuMetrics | None:
@@ -65,7 +72,11 @@ def ram_check() -> MemoryMetrics | None:
         logger.exception('RAM check error')
         return None
 
-def disk_check() -> dict[str, DiskMetrics] | None:
+def disk_check(
+        lsblk_timeout: float,
+        smartctl_timeout: float
+        ) -> dict[str, DiskMetrics] | None:
+    
     try:
         disks = psutil.disk_partitions()
 
@@ -73,14 +84,20 @@ def disk_check() -> dict[str, DiskMetrics] | None:
 
         for device in disks:
 
-            disk = get_parent_block(device.device)
+            disk = get_parent_block(
+                device.device,
+                lsblk_timeout=lsblk_timeout
+                )
+
+            if disk is None:
+                continue
 
             if disk not in disk_dict:
                 disk_dict[disk] = DiskMetrics(
                     temperature=None,
                     partitions=[]
                 )
-
+            
             memory_info = psutil.disk_usage(device.mountpoint)
             partition = PartitionMetrics(
                 partition=device.device,
@@ -93,7 +110,10 @@ def disk_check() -> dict[str, DiskMetrics] | None:
             disk_dict[disk].partitions.append(partition)
 
         for disk, disk_data in disk_dict.items():
-            disk_data.temperature = get_disk_temp(disk)
+            disk_data.temperature = get_disk_temp(
+                drive_path=disk,
+                smartctl_timeout = smartctl_timeout
+            )
 
         return disk_dict
     except Exception:
@@ -101,27 +121,58 @@ def disk_check() -> dict[str, DiskMetrics] | None:
         return None
 
 
-def get_disk_temp(drive_path: str) -> float | None:
-    result = subprocess.run(
-        ['sudo', 'smartctl', '-A', '-j', drive_path],
-        capture_output=True,
-        text=True)
+def get_disk_temp(
+        drive_path: str,
+        smartctl_timeout: float) -> float | None:
     try:
+        result = subprocess.run(
+            ['sudo', 'smartctl', '-A', '-j', drive_path],
+            capture_output=True,
+            text=True, timeout=smartctl_timeout)
         disk_data = json.loads(result.stdout)
         temperature = disk_data["temperature"]['current']
-    except Exception:
+    except subprocess.TimeoutExpired as exception:
+        logger.exception('Smartctl timeout %s', exception)
         temperature = None
+    except Exception as exception:
+        temperature = None
+        logger.exception('Smartctl error %s', exception)
     return temperature
 
-def get_parent_block(drive_path: str) -> str:
-    result = subprocess.run(
-        ['lsblk', '-no', 'pkname', str(drive_path)],
-        capture_output=True,
-        text=True
-    )
-    disk = "/dev/" + str(result.stdout.strip())
-    return disk
+def get_parent_block(drive_path: str, lsblk_timeout: float) -> str | None:
+    try:
+        result = subprocess.run(
+            ['lsblk', '-no', 'pkname', str(drive_path)],
+            capture_output=True,
+            text=True, timeout=lsblk_timeout
+        )
+        result.check_returncode()
 
+        parent = result.stdout.strip()
+
+        if not parent:
+            return None
+    
+        disk = "/dev/" + parent
+        return disk
+    
+    except subprocess.TimeoutExpired as exception:
+        logger.exception('Timeout while get parent block from %s,%s | %s',
+                         drive_path,
+                         exception,
+                         exception.stderr
+                         )
+        return None
+    except subprocess.CalledProcessError as exception:
+        logger.exception('lsblk error with disk %s| %s | %s',
+                         drive_path,
+                         exception,
+                         exception.stderr)
+        return None
+    except FileNotFoundError:
+        logger.exception('No lsblk in system')
+        return None
+    
 def get_uptime():
     try:
         boot_time = psutil.boot_time()

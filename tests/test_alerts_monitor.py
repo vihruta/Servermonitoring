@@ -1,5 +1,7 @@
 import pytest
 import asyncio
+import threading
+from pathlib import Path
 
 from models import (CpuMetrics, LoadAverage, 
                     RamMetrics, MemoryMetrics,
@@ -7,11 +9,12 @@ from models import (CpuMetrics, LoadAverage,
                     PartitionMetrics)
 import alerts.monitor as monitor
 import alerts.state_store as state_store
-
 from alerts.models import Thresholds
+
 from alerts.state_store import StateStore, IncidentStore, PendingStore, AlertCooldownStore
 from alerts.states import State, Alert
 
+from config import Settings, get_yaml_config
 
 def test_monitoring_metrics(monkeypatch):
     sent_alerts = []
@@ -656,7 +659,7 @@ async def test_monitoring_disks(monkeypatch):
         'monitoring_metrics': 0
     }
 
-    def fake_disk_check():
+    def fake_disk_check(**kwargs):
         calls['disk_check'] += 1
         return {'sdb': DiskMetrics(
             temperature=52,
@@ -724,7 +727,9 @@ async def test_monitoring_disks(monkeypatch):
         bot=None,
         chat_id=123,
         temperature_threshold=thresholds['temperature'],
-        usage_threshold=thresholds['usage']
+        usage_threshold=thresholds['usage'],
+        lsblk_timeout=10,
+        smartctl_timeout=10
     )
 
     assert calls['disk_check'] == 1
@@ -744,7 +749,7 @@ async def test_monitoring_disks_temperature_unavailable(monkeypatch):
         'monitoring_metrics': 0
     }
 
-    def fake_disk_check():
+    def fake_disk_check(**kwargs):
         calls['disk_check'] += 1
         return {'sdb': DiskMetrics(
             temperature=None,
@@ -812,7 +817,9 @@ async def test_monitoring_disks_temperature_unavailable(monkeypatch):
         bot=None,
         chat_id=123,
         temperature_threshold=thresholds['temperature'],
-        usage_threshold=thresholds['usage']
+        usage_threshold=thresholds['usage'],
+        lsblk_timeout=10,
+        smartctl_timeout=10
     )
 
     assert calls['disk_check'] == 1
@@ -830,7 +837,7 @@ async def test_monitoring_disks_efi_is_not_checking(monkeypatch):
         'monitoring_metrics': 0
     }
 
-    def fake_disk_check():
+    def fake_disk_check(**kwargs):
         calls['disk_check'] += 1
         return {'sdb': DiskMetrics(
             temperature=52,
@@ -898,7 +905,9 @@ async def test_monitoring_disks_efi_is_not_checking(monkeypatch):
         bot=None,
         chat_id=123,
         temperature_threshold=thresholds['temperature'],
-        usage_threshold=thresholds['usage']
+        usage_threshold=thresholds['usage'],
+        lsblk_timeout=10,
+        smartctl_timeout=10
     )
 
     assert calls['disk_check'] == 1
@@ -913,7 +922,7 @@ async def test_monitoring_disks_efi_is_not_checking(monkeypatch):
 async def test_monitoring_disks_unavailable(monkeypatch):
     metrics = []
 
-    def fake_disk_check():
+    def fake_disk_check(**kwargs):
         return None
 
     async def fake_monitoring_metrics(**kwargs):
@@ -957,7 +966,9 @@ async def test_monitoring_disks_unavailable(monkeypatch):
         bot=None,
         chat_id=123,
         temperature_threshold=thresholds['temperature'],
-        usage_threshold=thresholds['usage']
+        usage_threshold=thresholds['usage'],
+        lsblk_timeout=10,
+        smartctl_timeout=10
     )
 
     assert metrics == []
@@ -967,7 +978,7 @@ async def test_monitoring_disks_unavailable(monkeypatch):
 async def test_docker_monitoring_container_unavailable(monkeypatch):
     sent_alerts = []
 
-    def fake_get_conatiners_health():
+    def fake_get_conatiners_health(**kwargs):
         return None
 
     async def fake_send_container_alert(bot, chat_id, status):
@@ -997,7 +1008,8 @@ async def test_docker_monitoring_container_unavailable(monkeypatch):
         bot=None,
         chat_id=123,
         monitored_containers=monitored_containers,
-        cooldown=0
+        cooldown=0,
+        docker_timeout=10
     )
 
     assert sent_alerts == []
@@ -1006,7 +1018,7 @@ async def test_docker_monitoring_container_unavailable(monkeypatch):
 async def test_docker_monitoring_container_is_missing(monkeypatch):
     sent_alerts = []
 
-    def fake_get_conatiners_health():
+    def fake_get_conatiners_health(**kwargs):
         return {}
 
     async def fake_send_container_alert(bot, chat_id, status):
@@ -1036,7 +1048,8 @@ async def test_docker_monitoring_container_is_missing(monkeypatch):
         bot=None,
         chat_id=123,
         monitored_containers=monitored_containers,
-        cooldown=0
+        cooldown=0,
+        docker_timeout=10
     )
 
     assert sent_alerts[0]['abc'].status.alert == Alert.CRITICAL
@@ -1045,7 +1058,7 @@ async def test_docker_monitoring_container_is_missing(monkeypatch):
 async def test_docker_container_get_no_info(monkeypatch):
     sent_alerts = []
 
-    def fake_get_conatiners_health():
+    def fake_get_conatiners_health(**kwargs):
         return {'abc': None}
 
     async def fake_send_container_alert(bot, chat_id, status):
@@ -1075,7 +1088,8 @@ async def test_docker_container_get_no_info(monkeypatch):
         bot=None,
         chat_id=123,
         monitored_containers=monitored_containers,
-        cooldown=0
+        cooldown=0,
+        docker_timeout=10
     )
 
     assert sent_alerts == []
@@ -1268,3 +1282,108 @@ def test_pending_store_remove_metric():
     store.remove(metric='cpu')
 
     assert store.get(metric='cpu', state=State.WARNING) is None
+
+@pytest.mark.asyncio
+async def test_monitoring_disk_not_block_event_loop(monkeypatch):
+    loop = asyncio.get_running_loop()
+
+    started = asyncio.Event()
+    realese = threading.Event()
+
+    def fake_disk_check(*args, **kwargs):
+        loop.call_soon_threadsafe(started.set)
+        realese.wait(timeout=5)
+        return {}
+
+    monkeypatch.setattr(monitor, 'disk_check', fake_disk_check)
+
+    thresholds = Thresholds(
+        warning=85,
+        critical=95,
+        recovery=75
+    )
+
+    task = asyncio.create_task(
+        monitor.monitoring_disk(
+            store=StateStore(),
+            pending_timer=PendingStore(),
+            cooldown=AlertCooldownStore(),
+            bot=None,
+            chat_id=123,
+            temperature_threshold=thresholds,
+            usage_threshold=thresholds,
+            lsblk_timeout=5,
+            smartctl_timeout=10,
+        )
+    )
+
+    try:
+        await asyncio.wait_for(started.wait(), timeout=2)
+
+        assert not task.done()
+
+    finally:
+        realese.set()
+        await asyncio.wait_for(task, timeout=2)
+
+
+@pytest.mark.asyncio
+async def test_monitoring_loop_can_be_cancelled(monkeypatch):
+    project_root = Path(__file__).resolve().parents[1]
+
+    import yaml
+
+    data = yaml.safe_load(
+        (project_root / "config.example.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    data["telegram"] = {
+        "token": "test-token",
+        "allowed_users": [123],
+        "alert_chat_id": 123,
+    }
+    settings = Settings.model_validate(data)
+
+    cycle_finished = asyncio.Event()
+
+    async def fake_monitoring(*args, **kwargs):
+        pass
+
+    async def fake_monitoring_containers(*args, **kwargs):
+        cycle_finished.set()
+
+    monkeypatch.setattr(monitor, "monitoring_cpu", fake_monitoring)
+    monkeypatch.setattr(monitor, "monitoring_ram_usage", fake_monitoring)
+    monkeypatch.setattr(monitor, "monitoring_disk", fake_monitoring)
+    monkeypatch.setattr(
+        monitor,
+        "monitoring_containers",
+        fake_monitoring_containers,
+    )
+
+    task = asyncio.create_task(
+        monitor.monitoring_loop(
+            store=StateStore(),
+            cooldown=AlertCooldownStore(),
+            incident=IncidentStore(),
+            pending_timer=PendingStore(),
+            bot=None,
+            chat_id=123,
+            settings=settings,
+        )
+    )
+
+    try:
+        await asyncio.wait_for(cycle_finished.wait(), timeout=2)
+
+        task.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=2)
+
+        assert task.cancelled()
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

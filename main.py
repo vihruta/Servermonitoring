@@ -33,7 +33,7 @@ async def main():
 
     dp.include_router(start_router)
 
-    asyncio.create_task(
+    monitoring_task = asyncio.create_task(
         monitoring_loop(store,
                         cooldown,
                         incident,
@@ -43,8 +43,18 @@ async def main():
                         settings=settings
         )
     )
+    try:
+        await dp.start_polling(
+            bot,
+            settings=settings
+        )
+    finally:
+        monitoring_task.cancel()
 
-    await dp.start_polling(bot)
+    try:
+        await monitoring_task
+    except asyncio.CancelledError:
+        pass
 
 if __name__ == "__main__":
     asyncio.run(main())

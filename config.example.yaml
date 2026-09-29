@@ -39,6 +39,11 @@ thresholds:
       warning_duration: 120
       cooldown: 36000
 
+timeouts:
+  smartctl: 10
+  lsblk: 10
+  docker: 10
+
 docker:
   monitored_containers:
   - immich_server
