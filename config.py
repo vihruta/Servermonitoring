@@ -17,6 +17,22 @@ class DockerSettings(BaseModel):
     monitored_containers: set[str]
     cooldown: int = Field(default=600, ge=0)
 
+class HttpServiceSettings(BaseModel):
+    url: str
+    timeout: float = Field(default=10.0, gt=0)
+    expected_status: set[int] = Field(min_length=1)
+
+class HttpServicesSettings(BaseModel):
+    interval: float = Field(default=60.0, ge=0)
+    failure_duration: float = Field(default=120, gt=0)
+    cooldown: float = Field(default=600.0, gt=0)
+    monitored: dict[str, HttpServiceSettings]
+
+class InternetSettings(HttpServiceSettings):
+    interval: float = Field(default=60.0, ge=0)
+    failure_duration: float = Field(default=120.0, ge=0)
+    cooldown: float = Field(default=600.0, ge=0)
+
 class TelegramSettings(BaseModel):
     token: str
     allowed_users: set[int]
@@ -47,6 +63,8 @@ class Settings(BaseModel):
     telegram: TelegramSettings
     thresholds: ThresholdSettings
     timeouts: TimeOutSettings
+    http_services: HttpServicesSettings
+    internet: InternetSettings
 
 
 

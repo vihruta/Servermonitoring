@@ -22,3 +22,9 @@ class ContainerAlertData(BaseModel):
     container_status: str
     container_health: str | None
     downtime: float | None
+
+class HttpAlertData(BaseModel):
+    status: MetricStatus
+    result_code: int | None = None
+    error: str | None = None
+    duration: float | None = None

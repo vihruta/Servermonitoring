@@ -42,6 +42,33 @@ def get_container_state(
 
     return previous_state
 
+def get_http_state(
+        result_code: int | None,
+        is_failed: bool
+) -> State:
+    if result_code is not None:
+        if is_failed is True:
+            return State.WARNING
+        else:
+            return State.OK
+    else:
+        return State.CRITICAL
+
+
+def check_http_alert(
+        result_code: int | None,
+        is_failed: bool,
+        previous_state: State
+) -> MetricStatus:
+    current_state = get_http_state(
+        result_code=result_code,
+        is_failed=is_failed
+    )
+    
+    return check_state_transition(
+        current_state=current_state,
+        previous_state=previous_state
+    )
 
 def check_alert(value: float, previous_state: State, threshold: Thresholds)-> MetricStatus:
     current_state = get_current_state(value=value, 

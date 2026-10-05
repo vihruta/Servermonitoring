@@ -1,29 +1,38 @@
 import pytest
 import asyncio
 import threading
+import httpx
 from pathlib import Path
+from aiogram.exceptions import TelegramNetworkError
+from aiogram.methods import SendMessage
 
 from models import (CpuMetrics, LoadAverage, 
                     RamMetrics, MemoryMetrics,
                     SwapMetrics, DiskMetrics,
-                    PartitionMetrics)
+                    PartitionMetrics, HttpMetrics)
 import alerts.monitor as monitor
+from alerts.monitoring import containers as container_monitor
+from alerts.monitoring import hardware as hardware_monitor
+from alerts.monitoring import http as http_monitor
+from alerts.monitoring import network as network_monitor
 import alerts.state_store as state_store
 from alerts.models import Thresholds
 
-from alerts.state_store import StateStore, IncidentStore, PendingStore, AlertCooldownStore
+from alerts.state_store import StateStore, IncidentStore, PendingStore, AlertCooldownStore, NetworkAccidentStore
 from alerts.states import State, Alert
 
-from config import Settings, get_yaml_config
+from config import (Settings, get_yaml_config, 
+                    HttpServiceSettings, HttpServicesSettings,
+                    InternetSettings)
 
-def test_monitoring_metrics(monkeypatch):
+def test_monitoring_metrics(monkeypatch: pytest.MonkeyPatch):
     sent_alerts = []
 
     async def fake_send_alert(bot, chat_id, status):
         sent_alerts.append(status)
 
     monkeypatch.setattr(
-        monitor,
+        hardware_monitor,
         "send_alert",
         fake_send_alert
         )
@@ -43,7 +52,7 @@ def test_monitoring_metrics(monkeypatch):
         values = [70, 86, 87, 96, 70]
 
         for value in values:
-            await monitor.monitoring_metrics(
+            await hardware_monitor.monitoring_metrics(
                 metric_name='cpu_usage',
                 display_name='CPU usage',
                 value=value,
@@ -71,7 +80,7 @@ def test_monitoring_metrics(monkeypatch):
 
     assert store.get('cpu_usage') == State.OK
 
-def test_monitoring_metrics_timer(monkeypatch):
+def test_monitoring_metrics_timer(monkeypatch: pytest.MonkeyPatch):
     sent_alerts = []
     current_time = 0
 
@@ -82,7 +91,7 @@ def test_monitoring_metrics_timer(monkeypatch):
         return current_time
     
     monkeypatch.setattr(
-        monitor,
+        hardware_monitor,
         "send_alert",
         fake_send_alert
         )
@@ -107,7 +116,7 @@ def test_monitoring_metrics_timer(monkeypatch):
         values = [70, 86, 86, 86]
         nonlocal current_time
         for value in values:
-            await monitor.monitoring_metrics(
+            await hardware_monitor.monitoring_metrics(
                 metric_name='cpu_usage',
                 display_name='CPU usage',
                 value=value,
@@ -134,7 +143,7 @@ def test_monitoring_metrics_timer(monkeypatch):
         [Alert.WARNING, 180]
     ]
 
-def test_monitoring_metrics_timer_crit_warn_crit(monkeypatch):
+def test_monitoring_metrics_timer_crit_warn_crit(monkeypatch: pytest.MonkeyPatch):
     sent_alerts = []
     current_time = 0
 
@@ -145,7 +154,7 @@ def test_monitoring_metrics_timer_crit_warn_crit(monkeypatch):
         return current_time
     
     monkeypatch.setattr(
-        monitor,
+        hardware_monitor,
         "send_alert",
         fake_send_alert
         )
@@ -170,7 +179,7 @@ def test_monitoring_metrics_timer_crit_warn_crit(monkeypatch):
         values = [96, 86, 96]
         nonlocal current_time
         for value in values:
-            await monitor.monitoring_metrics(
+            await hardware_monitor.monitoring_metrics(
                 metric_name='cpu_usage',
                 display_name='CPU usage',
                 value=value,
@@ -198,7 +207,7 @@ def test_monitoring_metrics_timer_crit_warn_crit(monkeypatch):
         [Alert.CRITICAL, 120]
     ]
 
-def test_short_warning_sends_no_alerts(monkeypatch):
+def test_short_warning_sends_no_alerts(monkeypatch: pytest.MonkeyPatch):
     sent_alerts = []
     current_time = 0
 
@@ -209,7 +218,7 @@ def test_short_warning_sends_no_alerts(monkeypatch):
         return current_time
     
     monkeypatch.setattr(
-        monitor,
+        hardware_monitor,
         "send_alert",
         fake_send_alert
         )
@@ -234,7 +243,7 @@ def test_short_warning_sends_no_alerts(monkeypatch):
         values = [70, 86, 86, 70, 86, 83, 90]
         nonlocal current_time
         for value in values:
-            await monitor.monitoring_metrics(
+            await hardware_monitor.monitoring_metrics(
                 metric_name='cpu_usage',
                 display_name='CPU usage',
                 value=value,
@@ -260,7 +269,7 @@ def test_short_warning_sends_no_alerts(monkeypatch):
     assert len(alerts) == 0
 
 
-def test_warning_timer_restarts_after_normalization(monkeypatch):
+def test_warning_timer_restarts_after_normalization(monkeypatch: pytest.MonkeyPatch):
     sent_alerts = []
     current_time = 0
 
@@ -271,7 +280,7 @@ def test_warning_timer_restarts_after_normalization(monkeypatch):
         return current_time
     
     monkeypatch.setattr(
-        monitor,
+        hardware_monitor,
         "send_alert",
         fake_send_alert
         )
@@ -296,7 +305,7 @@ def test_warning_timer_restarts_after_normalization(monkeypatch):
         values = [70, 86, 86, 70, 86, 85, 90]
         nonlocal current_time
         for value in values:
-            await monitor.monitoring_metrics(
+            await hardware_monitor.monitoring_metrics(
                 metric_name='cpu_usage',
                 display_name='CPU usage',
                 value=value,
@@ -324,7 +333,7 @@ def test_warning_timer_restarts_after_normalization(monkeypatch):
     ]
 
 @pytest.mark.asyncio
-async def test_numeric_cooldown_restarts_after_repeat(monkeypatch):
+async def test_numeric_cooldown_restarts_after_repeat(monkeypatch: pytest.MonkeyPatch):
     sent_alerts = []
     current_time = 0.0
 
@@ -337,7 +346,7 @@ async def test_numeric_cooldown_restarts_after_repeat(monkeypatch):
         )
 
     monkeypatch.setattr(state_store.time, "monotonic", fake_monotonic)
-    monkeypatch.setattr(monitor, "send_alert", fake_send_alert)
+    monkeypatch.setattr(hardware_monitor, "send_alert", fake_send_alert)
 
     store = StateStore()
     pending_timer = PendingStore()
@@ -353,7 +362,7 @@ async def test_numeric_cooldown_restarts_after_repeat(monkeypatch):
     for moment in [0, 119, 120, 121, 239, 240]:
         current_time = moment
 
-        await monitor.monitoring_metrics(
+        await hardware_monitor.monitoring_metrics(
             metric_name="cpu_usage",
             display_name="CPU usage",
             value=90,
@@ -372,9 +381,9 @@ async def test_numeric_cooldown_restarts_after_repeat(monkeypatch):
         (Alert.WARNING, 240),
     ]
     assert store.get("cpu_usage") == State.WARNING
-
+    
 @pytest.mark.asyncio
-async def test_critical_interrupts_pending_warning(monkeypatch):
+async def test_critical_interrupts_pending_warning(monkeypatch: pytest.MonkeyPatch):
     sent_alerts = []
     current_time = 0.0
 
@@ -387,7 +396,7 @@ async def test_critical_interrupts_pending_warning(monkeypatch):
         )
 
     monkeypatch.setattr(state_store.time, "monotonic", fake_monotonic)
-    monkeypatch.setattr(monitor, "send_alert", fake_send_alert)
+    monkeypatch.setattr(hardware_monitor, "send_alert", fake_send_alert)
 
     store = StateStore()
     pending_timer = PendingStore()
@@ -403,7 +412,7 @@ async def test_critical_interrupts_pending_warning(monkeypatch):
     for moment, value in [(0, 86), (60, 96)]:
         current_time = moment
 
-        await monitor.monitoring_metrics(
+        await hardware_monitor.monitoring_metrics(
             metric_name="cpu_usage",
             display_name="CPU usage",
             value=value,
@@ -426,7 +435,7 @@ async def test_critical_interrupts_pending_warning(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_monitoring_cpu_no_cpu_data(monkeypatch):
+async def test_monitoring_cpu_no_cpu_data(monkeypatch: pytest.MonkeyPatch):
     metrics = []
 
     def fake_cpu_check():
@@ -436,13 +445,13 @@ async def test_monitoring_cpu_no_cpu_data(monkeypatch):
         metrics.append(kwargs)
 
     monkeypatch.setattr(
-        monitor,
+        hardware_monitor,
         'cpu_check',
         fake_cpu_check
     )
 
     monkeypatch.setattr(
-        monitor,
+        hardware_monitor,
         'monitoring_metrics',
         fake_monitoring_metrics
     )
@@ -457,7 +466,7 @@ async def test_monitoring_cpu_no_cpu_data(monkeypatch):
         warning_duration=120
     )
 
-    await monitor.monitoring_cpu(
+    await hardware_monitor.monitoring_cpu(
         store=store,
         pending_timer=pending_timer,
         cooldown=cooldown,
@@ -471,7 +480,7 @@ async def test_monitoring_cpu_no_cpu_data(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_monitoring_cpu(monkeypatch):
+async def test_monitoring_cpu(monkeypatch: pytest.MonkeyPatch):
 
     calls = {
         'cpu_check': 0,
@@ -507,8 +516,8 @@ async def test_monitoring_cpu(monkeypatch):
         calls['monitoring_metrics'] += 1
         metrics.append((metric_name, value, unit))
         
-    monkeypatch.setattr(monitor,'cpu_check', fake_cpu_check)
-    monkeypatch.setattr(monitor, 'monitoring_metrics', fake_monitoring_metrics)
+    monkeypatch.setattr(hardware_monitor,'cpu_check', fake_cpu_check)
+    monkeypatch.setattr(hardware_monitor, 'monitoring_metrics', fake_monitoring_metrics)
 
 
     store = StateStore()
@@ -521,7 +530,7 @@ async def test_monitoring_cpu(monkeypatch):
         warning_duration=120
     )
 
-    await monitor.monitoring_cpu(
+    await hardware_monitor.monitoring_cpu(
         store=store,
         pending_timer=pending_timer,
         cooldown=cooldown,
@@ -539,7 +548,7 @@ async def test_monitoring_cpu(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_monitoring_ram(monkeypatch):
+async def test_monitoring_ram(monkeypatch: pytest.MonkeyPatch):
 
     metrics = []
 
@@ -572,13 +581,13 @@ async def test_monitoring_ram(monkeypatch):
         metrics.append((metric_name, value, unit))
 
     monkeypatch.setattr(
-        monitor,
+        hardware_monitor,
         'ram_check',
         fake_ram_check
         )
     
     monkeypatch.setattr(
-        monitor,
+        hardware_monitor,
         'monitoring_metrics',
         fake_monitoring_metrics
         )
@@ -593,7 +602,7 @@ async def test_monitoring_ram(monkeypatch):
         warning_duration=120
     )
 
-    await monitor.monitoring_ram_usage(
+    await hardware_monitor.monitoring_ram_usage(
         store=store,
         pending_timer=pending_timer,
         cooldown=cooldown,
@@ -607,7 +616,7 @@ async def test_monitoring_ram(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_monitoring_ram_unavailable(monkeypatch):
+async def test_monitoring_ram_unavailable(monkeypatch: pytest.MonkeyPatch):
     metrics = []
 
     def fake_ram_check():
@@ -617,13 +626,13 @@ async def test_monitoring_ram_unavailable(monkeypatch):
         metrics.append(kwargs)
 
     monkeypatch.setattr(
-        monitor,
+        hardware_monitor,
         'ram_check',
         fake_ram_check
         )
 
     monkeypatch.setattr(
-        monitor,
+        hardware_monitor,
         'monitoring_metrics',
         fake_monitoring_metrics
     )
@@ -638,7 +647,7 @@ async def test_monitoring_ram_unavailable(monkeypatch):
         warning_duration=120
     )
 
-    await monitor.monitoring_ram_usage(
+    await hardware_monitor.monitoring_ram_usage(
         store=store,
         pending_timer=pending_timer,
         cooldown=cooldown,
@@ -651,7 +660,7 @@ async def test_monitoring_ram_unavailable(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_monitoring_disks(monkeypatch):
+async def test_monitoring_disks(monkeypatch: pytest.MonkeyPatch):
     metrics = []
 
     calls = {
@@ -690,13 +699,13 @@ async def test_monitoring_disks(monkeypatch):
         metrics.append((metric_name, value, unit))
 
     monkeypatch.setattr(
-        monitor,
+        hardware_monitor,
         'disk_check',
         fake_disk_check
     )
 
     monkeypatch.setattr(
-        monitor,
+        hardware_monitor,
         'monitoring_metrics',
         fake_monitoring_metrics
     )
@@ -720,7 +729,7 @@ async def test_monitoring_disks(monkeypatch):
     }
 
 
-    await monitor.monitoring_disk(
+    await hardware_monitor.monitoring_disk(
         store=store,
         pending_timer=pending_timer,
         cooldown=cooldown,
@@ -741,7 +750,7 @@ async def test_monitoring_disks(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_monitoring_disks_temperature_unavailable(monkeypatch):
+async def test_monitoring_disks_temperature_unavailable(monkeypatch: pytest.MonkeyPatch):
     metrics = []
 
     calls = {
@@ -780,13 +789,13 @@ async def test_monitoring_disks_temperature_unavailable(monkeypatch):
         metrics.append((metric_name, value, unit))
 
     monkeypatch.setattr(
-        monitor,
+        hardware_monitor,
         'disk_check',
         fake_disk_check
     )
 
     monkeypatch.setattr(
-        monitor,
+        hardware_monitor,
         'monitoring_metrics',
         fake_monitoring_metrics
     )
@@ -810,7 +819,7 @@ async def test_monitoring_disks_temperature_unavailable(monkeypatch):
     }
 
 
-    await monitor.monitoring_disk(
+    await hardware_monitor.monitoring_disk(
         store=store,
         pending_timer=pending_timer,
         cooldown=cooldown,
@@ -829,7 +838,7 @@ async def test_monitoring_disks_temperature_unavailable(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_monitoring_disks_efi_is_not_checking(monkeypatch):
+async def test_monitoring_disks_efi_is_not_checking(monkeypatch: pytest.MonkeyPatch):
     metrics = []
 
     calls = {
@@ -868,13 +877,13 @@ async def test_monitoring_disks_efi_is_not_checking(monkeypatch):
         metrics.append((metric_name, value, unit))
 
     monkeypatch.setattr(
-        monitor,
+        hardware_monitor,
         'disk_check',
         fake_disk_check
     )
 
     monkeypatch.setattr(
-        monitor,
+        hardware_monitor,
         'monitoring_metrics',
         fake_monitoring_metrics
     )
@@ -898,7 +907,7 @@ async def test_monitoring_disks_efi_is_not_checking(monkeypatch):
     }
 
 
-    await monitor.monitoring_disk(
+    await hardware_monitor.monitoring_disk(
         store=store,
         pending_timer=pending_timer,
         cooldown=cooldown,
@@ -919,7 +928,7 @@ async def test_monitoring_disks_efi_is_not_checking(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_monitoring_disks_unavailable(monkeypatch):
+async def test_monitoring_disks_unavailable(monkeypatch: pytest.MonkeyPatch):
     metrics = []
 
     def fake_disk_check(**kwargs):
@@ -929,13 +938,13 @@ async def test_monitoring_disks_unavailable(monkeypatch):
         metrics.append(kwargs)
 
     monkeypatch.setattr(
-        monitor,
+        hardware_monitor,
         'disk_check',
         fake_disk_check
     )
 
     monkeypatch.setattr(
-        monitor,
+        hardware_monitor,
         'monitoring_metrics',
         fake_monitoring_metrics
     )
@@ -959,7 +968,7 @@ async def test_monitoring_disks_unavailable(monkeypatch):
     }
 
 
-    await monitor.monitoring_disk(
+    await hardware_monitor.monitoring_disk(
         store=store,
         pending_timer=pending_timer,
         cooldown=cooldown,
@@ -975,7 +984,7 @@ async def test_monitoring_disks_unavailable(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_docker_monitoring_container_unavailable(monkeypatch):
+async def test_docker_monitoring_container_unavailable(monkeypatch: pytest.MonkeyPatch):
     sent_alerts = []
 
     def fake_get_conatiners_health(**kwargs):
@@ -985,23 +994,23 @@ async def test_docker_monitoring_container_unavailable(monkeypatch):
         sent_alerts.append(status)
 
     monkeypatch.setattr(
-        monitor,
+        container_monitor,
         'get_containers_health',
         fake_get_conatiners_health
     )
 
     monkeypatch.setattr(
-        monitor,
+        container_monitor,
         'send_container_alert',
         fake_send_container_alert
     )
 
-    monitored_containers = ('abc', 'bcd', 'edf')
+    monitored_containers = {'abc', 'bcd', 'edf'}
     store = StateStore()
     incident = IncidentStore()
     cooldown_timer = AlertCooldownStore()
 
-    await monitor.monitoring_containers(
+    await container_monitor.monitoring_containers(
         store=store,
         incident=incident,
         cooldown_timer=cooldown_timer,
@@ -1015,7 +1024,7 @@ async def test_docker_monitoring_container_unavailable(monkeypatch):
     assert sent_alerts == []
 
 @pytest.mark.asyncio
-async def test_docker_monitoring_container_is_missing(monkeypatch):
+async def test_docker_monitoring_container_is_missing(monkeypatch: pytest.MonkeyPatch):
     sent_alerts = []
 
     def fake_get_conatiners_health(**kwargs):
@@ -1025,13 +1034,13 @@ async def test_docker_monitoring_container_is_missing(monkeypatch):
         sent_alerts.append(status)
 
     monkeypatch.setattr(
-        monitor,
+        container_monitor,
         'get_containers_health',
         fake_get_conatiners_health
     )
 
     monkeypatch.setattr(
-        monitor,
+        container_monitor,
         'send_container_alert',
         fake_send_container_alert
     )
@@ -1041,7 +1050,7 @@ async def test_docker_monitoring_container_is_missing(monkeypatch):
     incident = IncidentStore()
     cooldown_timer = AlertCooldownStore()
 
-    await monitor.monitoring_containers(
+    await container_monitor.monitoring_containers(
         store=store,
         incident=incident,
         cooldown_timer=cooldown_timer,
@@ -1055,7 +1064,7 @@ async def test_docker_monitoring_container_is_missing(monkeypatch):
     assert sent_alerts[0]['abc'].status.alert == Alert.CRITICAL
 
 @pytest.mark.asyncio
-async def test_docker_container_get_no_info(monkeypatch):
+async def test_docker_container_get_no_info(monkeypatch: pytest.MonkeyPatch):
     sent_alerts = []
 
     def fake_get_conatiners_health(**kwargs):
@@ -1065,13 +1074,13 @@ async def test_docker_container_get_no_info(monkeypatch):
         sent_alerts.append(status)
 
     monkeypatch.setattr(
-        monitor,
+        container_monitor,
         'get_containers_health',
         fake_get_conatiners_health
     )
 
     monkeypatch.setattr(
-        monitor,
+        container_monitor,
         'send_container_alert',
         fake_send_container_alert
     )
@@ -1081,7 +1090,7 @@ async def test_docker_container_get_no_info(monkeypatch):
     incident = IncidentStore()
     cooldown_timer = AlertCooldownStore()
 
-    await monitor.monitoring_containers(
+    await container_monitor.monitoring_containers(
         store=store,
         incident=incident,
         cooldown_timer=cooldown_timer,
@@ -1096,7 +1105,7 @@ async def test_docker_container_get_no_info(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_docker_container_lifecycle(monkeypatch):
+async def test_docker_container_lifecycle(monkeypatch: pytest.MonkeyPatch):
     sent_alerts = []
     async def fake_send_container_alert(
         bot,
@@ -1106,7 +1115,7 @@ async def test_docker_container_lifecycle(monkeypatch):
         sent_alerts.append(status)
 
     monkeypatch.setattr(
-        monitor,
+        container_monitor,
         "send_container_alert",
         fake_send_container_alert,
     )
@@ -1122,7 +1131,7 @@ async def test_docker_container_lifecycle(monkeypatch):
     ]
 
     for container_status in container_statuses:
-        await monitor.docker_monitoring_metrics(
+        await container_monitor.docker_monitoring_metrics(
             container_name="vaultwarden",
             container_status=container_status,
             container_health=None,
@@ -1157,10 +1166,9 @@ async def test_docker_container_lifecycle(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_docker_monitoring_cooldown(monkeypatch):
+async def test_docker_monitoring_cooldown(monkeypatch: pytest.MonkeyPatch):
     sent_alerts = []
     current_time = 0
-
     async def fake_send_container_alert(
         bot,
         chat_id,
@@ -1169,7 +1177,7 @@ async def test_docker_monitoring_cooldown(monkeypatch):
         sent_alerts.append([status, current_time])
 
     monkeypatch.setattr(
-        monitor,
+        container_monitor,
         "send_container_alert",
         fake_send_container_alert,
     )
@@ -1197,7 +1205,7 @@ async def test_docker_monitoring_cooldown(monkeypatch):
     cooldown = 70
 
     for container_status in container_statuses:
-        await monitor.docker_monitoring_metrics(
+        await container_monitor.docker_monitoring_metrics(
             container_name="vaultwarden",
             container_status=container_status,
             container_health=None,
@@ -1237,7 +1245,7 @@ async def test_docker_monitoring_cooldown(monkeypatch):
     recovery = sent_alerts[-1][0]["vaultwarden"]
     assert recovery.downtime == 180
 
-def test_pending_store_preserves_start_time(monkeypatch):
+def test_pending_store_preserves_start_time(monkeypatch: pytest.MonkeyPatch):
     current_time = 100.0
 
     def fake_monotonic():
@@ -1284,7 +1292,7 @@ def test_pending_store_remove_metric():
     assert store.get(metric='cpu', state=State.WARNING) is None
 
 @pytest.mark.asyncio
-async def test_monitoring_disk_not_block_event_loop(monkeypatch):
+async def test_monitoring_disk_not_block_event_loop(monkeypatch: pytest.MonkeyPatch):
     loop = asyncio.get_running_loop()
 
     started = asyncio.Event()
@@ -1295,7 +1303,7 @@ async def test_monitoring_disk_not_block_event_loop(monkeypatch):
         realese.wait(timeout=5)
         return {}
 
-    monkeypatch.setattr(monitor, 'disk_check', fake_disk_check)
+    monkeypatch.setattr(hardware_monitor, 'disk_check', fake_disk_check)
 
     thresholds = Thresholds(
         warning=85,
@@ -1304,7 +1312,7 @@ async def test_monitoring_disk_not_block_event_loop(monkeypatch):
     )
 
     task = asyncio.create_task(
-        monitor.monitoring_disk(
+        hardware_monitor.monitoring_disk(
             store=StateStore(),
             pending_timer=PendingStore(),
             cooldown=AlertCooldownStore(),
@@ -1328,7 +1336,7 @@ async def test_monitoring_disk_not_block_event_loop(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_monitoring_loop_can_be_cancelled(monkeypatch):
+async def test_monitoring_loop_can_be_cancelled(monkeypatch: pytest.MonkeyPatch):
     project_root = Path(__file__).resolve().parents[1]
 
     import yaml
@@ -1365,7 +1373,7 @@ async def test_monitoring_loop_can_be_cancelled(monkeypatch):
     task = asyncio.create_task(
         monitor.monitoring_loop(
             store=StateStore(),
-            cooldown=AlertCooldownStore(),
+            cooldown_timer=AlertCooldownStore(),
             incident=IncidentStore(),
             pending_timer=PendingStore(),
             bot=None,
@@ -1387,3 +1395,819 @@ async def test_monitoring_loop_can_be_cancelled(monkeypatch):
         if not task.done():
             task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_http_rapid_rejection(monkeypatch):
+    current_time = 0
+    sent_alert = 0
+
+    async def fake_handler(request: httpx.Request) -> httpx.Response:
+        nonlocal current_time
+        if current_time == 0:
+            raise httpx.TimeoutException(
+                message='Connection error',
+                request=request
+            )
+        else:
+            code = 200
+
+        return httpx.Response(status_code=code)
+    
+    fake_transport = httpx.MockTransport(handler=fake_handler)
+
+    def fake_monotonic():
+        return current_time
+
+    monkeypatch.setattr(
+        state_store.time,
+        "monotonic",
+        fake_monotonic
+    )
+
+    def fake_send_http_alert(
+            bot,
+            chat_id,
+            status
+        ):
+        nonlocal sent_alert
+        sent_alert += 1
+
+    monkeypatch.setattr(
+        http_monitor,
+        "send_http_alert",
+        fake_send_http_alert
+    )
+
+    first_service = 'test_app'
+    first_settings = HttpServiceSettings(
+        url='https://test_app.com',
+        timeout=10,
+        expected_status={200}
+    )
+
+    settings = HttpServicesSettings(
+        interval = 1,
+        failure_duration= 120,
+        monitored={
+                first_service: first_settings
+            }
+    )
+    store = StateStore()
+    incident = IncidentStore()
+    cooldown_timer = AlertCooldownStore()
+
+    async with httpx.AsyncClient(transport=fake_transport) as client:
+        await http_monitor.http_monitoring(
+            client=client,
+            store=store,
+            incident=incident,
+            cooldown_timer=cooldown_timer,
+            bot=None,
+            chat_id=123,
+            http_settings=settings
+        )
+        current_time = 60
+        await http_monitor.http_monitoring(
+            client=client,
+            store=store,
+            incident=incident,
+            cooldown_timer=cooldown_timer,
+            bot=None,
+            chat_id=123,
+            http_settings=settings
+        )
+
+    assert sent_alert == 0
+    assert incident.get(metric=f'http_check_{first_service}') is None
+    assert store.get(metric=f'http_check_{first_service}') == State.OK
+
+
+@pytest.mark.asyncio
+async def test_http_return_border_error(monkeypatch):
+    current_time = 0
+    sent_alert = []
+
+    async def fake_handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.TimeoutException(
+            message='Connection error',
+            request=request
+        )
+
+    
+    fake_transport = httpx.MockTransport(handler=fake_handler)
+
+    def fake_monotonic():
+        return current_time
+
+    monkeypatch.setattr(
+        state_store.time,
+        "monotonic",
+        fake_monotonic
+    )
+
+    async def fake_send_http_alert(
+            bot,
+            chat_id,
+            status
+        ):
+        sent_alert.append(status)
+
+    monkeypatch.setattr(
+        http_monitor,
+        "send_http_alert",
+        fake_send_http_alert
+    )
+
+    first_service = 'test_app'
+    first_settings = HttpServiceSettings(
+        url='https://test_app.com',
+        timeout=10,
+        expected_status={200}
+    )
+
+    settings = HttpServicesSettings(
+        interval = 1,
+        failure_duration= 120,
+        monitored={
+                first_service: first_settings
+            }
+    )
+    store = StateStore()
+    incident = IncidentStore()
+    cooldown_timer = AlertCooldownStore()
+
+    async with httpx.AsyncClient(transport=fake_transport) as client:
+        await http_monitor.http_monitoring(
+            client=client,
+            store=store,
+            incident=incident,
+            cooldown_timer=cooldown_timer,
+            bot=None,
+            chat_id=123,
+            http_settings=settings
+        )
+        current_time = 119
+        assert store.get(metric=f'http_check_{first_service}') == State.OK
+        await http_monitor.http_monitoring(
+            client=client,
+            store=store,
+            incident=incident,
+            cooldown_timer=cooldown_timer,
+            bot=None,
+            chat_id=123,
+            http_settings=settings
+        )
+
+        assert store.get(metric=f'http_check_{first_service}') == State.OK
+        assert sent_alert == []
+        current_time = 120
+        await http_monitor.http_monitoring(
+            client=client,
+            store=store,
+            incident=incident,
+            cooldown_timer=cooldown_timer,
+            bot=None,
+            chat_id=123,
+            http_settings=settings
+        )
+
+    assert store.get(metric=f'http_check_{first_service}') == State.CRITICAL
+    assert len(sent_alert) == 1
+    assert sent_alert[0][first_service].status.alert == Alert.CRITICAL
+    assert incident.get(metric=f'http_check_{first_service}') == 0
+
+
+@pytest.mark.asyncio
+async def test_http_failure_timer_restarts_after_short_recovery(monkeypatch):
+    current_time = 0
+    sent_alert = []
+
+    async def fake_handler(request: httpx.Request) -> httpx.Response:
+        nonlocal current_time
+        if current_time == 60:
+            return httpx.Response(status_code=200)
+        
+        raise httpx.TimeoutException(
+            message='Connection error',
+            request=request
+        )
+
+    
+    fake_transport = httpx.MockTransport(handler=fake_handler)
+
+    def fake_monotonic():
+        return current_time
+
+    monkeypatch.setattr(
+        state_store.time,
+        "monotonic",
+        fake_monotonic
+    )
+
+    async def fake_send_http_alert(
+            bot,
+            chat_id,
+            status
+        ):
+        sent_alert.append(status)
+
+    monkeypatch.setattr(
+        http_monitor,
+        "send_http_alert",
+        fake_send_http_alert
+    )
+
+    service = 'test_app'
+    setting = HttpServiceSettings(
+        url='https://test_app.com',
+        timeout=10,
+        expected_status={200}
+    )
+
+    settings = HttpServicesSettings(
+        interval = 1,
+        failure_duration= 120,
+        monitored={
+                service: setting
+        }
+    )
+
+    store = StateStore()
+    incident = IncidentStore()
+    cooldown_timer = AlertCooldownStore()
+
+    async with httpx.AsyncClient(transport=fake_transport) as client:
+        for _ in range(8):
+            await http_monitor.http_monitoring(
+                client=client,
+                store=store,
+                incident=incident,
+                cooldown_timer=cooldown_timer,
+                bot=None,
+                chat_id=123,
+                http_settings=settings
+            )
+            if current_time < 210:
+                assert sent_alert == []
+            current_time += 30
+
+    assert store.get(metric=f'http_check_{service}') == State.CRITICAL
+    assert len(sent_alert) == 1
+    assert sent_alert[0][service].status.alert == Alert.CRITICAL
+    assert incident.get(metric=f'http_check_{service}') == 90
+
+
+@pytest.mark.asyncio
+async def test_http_recovery_reports_downtime(monkeypatch):
+    current_time = 0
+    sent_alerts = []
+
+    def fake_handler(request: httpx.Request) -> httpx.Response:
+        if current_time == 180:
+            return httpx.Response(status_code=200)
+
+        raise httpx.ReadTimeout("Timeout", request=request)
+
+    def fake_monotonic():
+        return current_time
+
+    async def fake_send_http_alert(bot, chat_id, status):
+        sent_alerts.append(status)
+
+    monkeypatch.setattr(
+        state_store.time, "monotonic", fake_monotonic
+    )
+    monkeypatch.setattr(
+        http_monitor, "send_http_alert", fake_send_http_alert
+    )
+
+    service = "test_app"
+    metric_name = f"http_check_{service}"
+
+    settings = HttpServicesSettings(
+        interval=60,
+        failure_duration=120,
+        cooldown=600,
+        monitored={
+            service: HttpServiceSettings(
+                url="https://test.example",
+                timeout=10,
+                expected_status={200},
+            )
+        },
+    )
+
+    store = StateStore()
+    incident = IncidentStore()
+    cooldown_timer = AlertCooldownStore()
+
+    transport = httpx.MockTransport(fake_handler)
+
+    async with httpx.AsyncClient(transport=transport) as client:
+        for timestamp in (0, 120, 180):
+            current_time = timestamp
+
+            await http_monitor.http_monitoring(
+                client=client,
+                store=store,
+                incident=incident,
+                cooldown_timer=cooldown_timer,
+                bot=None,
+                chat_id=123,
+                http_settings=settings,
+            )
+
+            if timestamp == 0:
+                assert sent_alerts == []
+                assert store.get(metric_name) == State.OK
+                assert incident.get(metric_name) == 0
+
+            elif timestamp == 120:
+                assert len(sent_alerts) == 1
+                assert (
+                    sent_alerts[0][service].status.alert
+                    == Alert.CRITICAL
+                )
+                assert store.get(metric_name) == State.CRITICAL
+
+    assert [
+        message[service].status.alert
+        for message in sent_alerts
+    ] == [Alert.CRITICAL, Alert.RECOVERED]
+
+    recovery = sent_alerts[1][service]
+    assert recovery.result_code == 200
+    assert recovery.error is None
+    assert recovery.duration == 180
+
+    assert store.get(metric_name) == State.OK
+    assert incident.get(metric_name) is None
+    assert cooldown_timer.check(metric_name, settings.cooldown)
+
+
+@pytest.mark.asyncio
+async def test_network_short_failure_is_reset(monkeypatch):
+    is_failed = True
+    current_time = 0.0
+
+    async def fake_network_check(
+            client,
+            service_settings
+    ):
+        return HttpMetrics(
+            service='Internet',
+            result_code=None if is_failed else 200,
+            is_failed=is_failed,
+            error="Timeout error" if is_failed else None,
+            duration_seconds=0.1,
+        )
+
+    monkeypatch.setattr(
+        network_monitor,
+        'network_check',
+        fake_network_check
+    )
+
+    def fake_monotonic():
+        return current_time
+
+
+    monkeypatch.setattr(
+        state_store.time, "monotonic", fake_monotonic
+    )
+    network_incident = NetworkAccidentStore()
+    cooldown = AlertCooldownStore()
+    network_settings = InternetSettings(
+        url='http://example.com',
+        timeout=120,
+        expected_status={200},
+        interval=60,
+        failure_duration=120,
+        cooldown=60
+    )
+
+    async with httpx.AsyncClient() as client:
+        await network_monitor.network_monitoring_metrics(
+            client=client,
+            network_incident=network_incident,
+            network_settings=network_settings,
+            cooldown=cooldown,
+            bot=None,
+            chat_id=123
+        )
+
+        assert network_incident.started_at == 0
+        assert network_incident.confirmed is False
+
+        current_time = 60
+        is_failed = False
+
+        await network_monitor.network_monitoring_metrics(
+            client=client,
+            network_incident=network_incident,
+            network_settings=network_settings,
+            cooldown=cooldown,
+            bot=None,
+            chat_id=123
+        )
+
+        assert network_incident.started_at is None
+        assert network_incident.confirmed is False
+        assert network_incident.notified is False
+
+
+@pytest.mark.asyncio
+async def test_network_failure_is_confirmed_at_threshold(monkeypatch):
+    is_failed = True
+    current_time = 0.0
+    sent_alerts = []
+
+    async def fake_send_network_alert(
+            bot,
+            chat_id,
+            problem_was_notified,
+            status):
+        sent_alerts.append(status)
+
+    monkeypatch.setattr(
+        network_monitor,
+        "send_network_alert",
+        fake_send_network_alert,
+    )
+    async def fake_network_check(
+            client,
+            service_settings
+    ):
+        return HttpMetrics(
+            service='Internet',
+            result_code=None,
+            is_failed=True,
+            error="Timeout error",
+            duration_seconds=0.1,
+        )
+
+    monkeypatch.setattr(
+        network_monitor,
+        'network_check',
+        fake_network_check
+    )
+
+    def fake_monotonic():
+        return current_time
+
+
+    monkeypatch.setattr(
+        state_store.time, "monotonic", fake_monotonic
+    )
+    network_incident = NetworkAccidentStore()
+    cooldown = AlertCooldownStore()
+    network_settings = InternetSettings(
+        url='http://example.com',
+        timeout=120,
+        expected_status={200},
+        interval=60,
+        failure_duration=120,
+        cooldown=60
+    )
+
+    async with httpx.AsyncClient() as client:
+        await network_monitor.network_monitoring_metrics(
+            client=client,
+            network_incident=network_incident,
+            network_settings=network_settings,
+            cooldown=cooldown,
+            bot=None,
+            chat_id=123
+        )
+
+        assert network_incident.started_at == 0.0
+        assert network_incident.confirmed is False
+        assert network_incident.notified is False
+
+        current_time = 119
+
+        await network_monitor.network_monitoring_metrics(
+            client=client,
+            network_incident=network_incident,
+            network_settings=network_settings,
+            cooldown=cooldown,
+            bot=None,
+            chat_id=123
+        )
+
+        assert network_incident.started_at == 0.0
+        assert network_incident.confirmed is False
+        assert network_incident.notified is False
+
+        current_time = 120
+        await network_monitor.network_monitoring_metrics(
+            client=client,
+            network_incident=network_incident,
+            network_settings=network_settings,
+            cooldown=cooldown,
+            bot=None,
+            chat_id=123
+        )
+
+        assert network_incident.started_at == 0.0
+        assert network_incident.confirmed is True
+        assert network_incident.notified is True
+        assert len(sent_alerts) == 1
+
+
+@pytest.mark.asyncio
+async def test_network_recovery_retry_preserves_downtime(monkeypatch):
+    current_time = 0.0
+    delivered = []
+    recovery_attempts = []
+
+    def fake_monotonic():
+        return current_time
+
+    async def fake_network_check(client, service_settings):
+        is_failed = current_time < 180
+
+        return HttpMetrics(
+            service="internet",
+            result_code=None if is_failed else 200,
+            is_failed=is_failed,
+            error="Timeout error" if is_failed else None,
+            duration_seconds=0.1,
+        )
+
+    async def fake_send_network_alert(
+        bot,
+        chat_id,
+        status,
+        problem_was_notified,
+    ):
+        alert = status["Network"]
+
+        if alert.status.alert == Alert.RECOVERED:
+            recovery_attempts.append(
+                (current_time, alert.duration, problem_was_notified)
+            )
+
+            if current_time == 180:
+                raise TelegramNetworkError(
+                    method=SendMessage(chat_id=chat_id, text="Test"),
+                    message="Network unavailable",
+                )
+
+        delivered.append(alert)
+
+    monkeypatch.setattr(
+        state_store.time, "monotonic", fake_monotonic
+    )
+    monkeypatch.setattr(
+        network_monitor, "network_check", fake_network_check
+    )
+    monkeypatch.setattr(
+        network_monitor, "send_network_alert", fake_send_network_alert
+    )
+
+    incident = NetworkAccidentStore()
+    cooldown = AlertCooldownStore()
+    settings = InternetSettings(
+        url="https://example.com",
+        timeout=10,
+        expected_status={200},
+        interval=60,
+        failure_duration=120,
+        cooldown=600,
+    )
+
+    async with httpx.AsyncClient() as client:
+        async def run_check():
+            await network_monitor.network_monitoring_metrics(
+                client=client,
+                network_incident=incident,
+                network_settings=settings,
+                cooldown=cooldown,
+                bot=None,
+                chat_id=123,
+            )
+
+        await run_check()
+        assert delivered == []
+
+        current_time = 120.0
+        await run_check()
+
+        assert len(delivered) == 1
+        assert delivered[0].status.alert == Alert.CRITICAL
+        assert incident.notified is True
+
+        current_time = 180.0
+        await run_check()
+
+        assert len(delivered) == 1
+        assert incident.started_at == 0.0
+        assert incident.recovered_at == 180.0
+        assert incident.confirmed is True
+        assert incident.notified is True
+        assert incident.get_duration() == 180.0
+
+        current_time = 240.0
+        await run_check()
+
+        assert recovery_attempts == [
+            (180.0, 180.0, True),
+            (240.0, 180.0, True),
+        ]
+        assert len(delivered) == 2
+        assert delivered[1].status.alert == Alert.RECOVERED
+        assert delivered[1].duration == 180.0
+
+        assert incident.started_at is None
+        assert incident.recovered_at is None
+        assert incident.confirmed is False
+        assert incident.notified is False
+
+
+@pytest.mark.asyncio
+async def test_network_recovery_after_delivered_alert(monkeypatch):
+    current_time = 0.0
+    sent_alerts = []
+
+    def fake_monotonic():
+        return current_time
+
+    async def fake_network_check(client, service_settings):
+        is_failed = current_time < 180
+
+        return HttpMetrics(
+            service="internet",
+            result_code=None if is_failed else 200,
+            is_failed=is_failed,
+            error="Timeout error" if is_failed else None,
+            duration_seconds=0.1,
+        )
+
+    async def fake_send_network_alert(
+        bot,
+        chat_id,
+        status,
+        problem_was_notified,
+    ):
+        sent_alerts.append(
+            (current_time, status["Network"], problem_was_notified)
+        )
+
+    monkeypatch.setattr(
+        state_store.time, "monotonic", fake_monotonic
+    )
+    monkeypatch.setattr(
+        network_monitor, "network_check", fake_network_check
+    )
+    monkeypatch.setattr(
+        network_monitor, "send_network_alert", fake_send_network_alert
+    )
+
+    incident = NetworkAccidentStore()
+    cooldown = AlertCooldownStore()
+    settings = InternetSettings(
+        url="https://example.com",
+        timeout=10,
+        expected_status={200},
+        interval=60,
+        failure_duration=120,
+        cooldown=600,
+    )
+
+    async with httpx.AsyncClient() as client:
+        async def run_check():
+            await network_monitor.network_monitoring_metrics(
+                client=client,
+                network_incident=incident,
+                network_settings=settings,
+                cooldown=cooldown,
+                bot=None,
+                chat_id=123,
+            )
+
+        await run_check()
+
+        assert sent_alerts == []
+        assert incident.started_at == 0.0
+        assert incident.confirmed is False
+        assert incident.notified is False
+
+        current_time = 120.0
+        await run_check()
+
+        assert len(sent_alerts) == 1
+        timestamp, alert, was_notified = sent_alerts[0]
+
+        assert timestamp == 120.0
+        assert alert.status.alert == Alert.CRITICAL
+        assert alert.status.state == State.CRITICAL
+        assert alert.duration == 120.0
+        assert was_notified is False
+        assert incident.confirmed is True
+        assert incident.notified is True
+
+        current_time = 180.0
+        await run_check()
+
+        assert len(sent_alerts) == 2
+        timestamp, recovery, was_notified = sent_alerts[1]
+
+        assert timestamp == 180.0
+        assert recovery.status.alert == Alert.RECOVERED
+        assert recovery.status.state == State.OK
+        assert recovery.result_code == 200
+        assert recovery.error is None
+        assert recovery.duration == 180.0
+        assert was_notified is True
+
+        assert incident.started_at is None
+        assert incident.recovered_at is None
+        assert incident.confirmed is False
+        assert incident.notified is False
+
+        current_time = 240.0
+        await run_check()
+
+        assert len(sent_alerts) == 2
+
+
+@pytest.mark.asyncio
+async def test_network_alert_repeats_after_cooldown(monkeypatch):
+    current_time = 0.0
+    sent_at = []
+    sent_alerts = []
+
+    def fake_monotonic():
+        return current_time
+
+    async def fake_network_check(client, service_settings):
+        return HttpMetrics(
+            service="internet",
+            result_code=None,
+            is_failed=True,
+            error="Timeout error",
+            duration_seconds=0.1,
+        )
+
+    async def fake_send_network_alert(
+        bot,
+        chat_id,
+        status,
+        problem_was_notified,
+    ):
+        sent_at.append(current_time)
+        sent_alerts.append(status["Network"])
+
+    monkeypatch.setattr(
+        state_store.time, "monotonic", fake_monotonic
+    )
+    monkeypatch.setattr(
+        network_monitor, "network_check", fake_network_check
+    )
+    monkeypatch.setattr(
+        network_monitor, "send_network_alert", fake_send_network_alert
+    )
+
+    incident = NetworkAccidentStore()
+    cooldown = AlertCooldownStore()
+    settings = InternetSettings(
+        url="https://example.com",
+        timeout=10,
+        expected_status={200},
+        interval=60,
+        failure_duration=120,
+        cooldown=600,
+    )
+
+    async with httpx.AsyncClient() as client:
+        for timestamp, expected_count in (
+            (0, 0),
+            (120, 1),
+            (719, 1),
+            (720, 2),
+            (721, 2),
+        ):
+            current_time = timestamp
+
+            await network_monitor.network_monitoring_metrics(
+                client=client,
+                network_incident=incident,
+                network_settings=settings,
+                cooldown=cooldown,
+                bot=None,
+                chat_id=123,
+            )
+
+            assert len(sent_at) == expected_count
+
+    assert sent_at == [120, 720]
+    assert [alert.status.alert for alert in sent_alerts] == [
+        Alert.CRITICAL,
+        Alert.CRITICAL,
+    ]
+
+    assert incident.started_at == 0
+    assert incident.confirmed is True
+    assert incident.notified is True

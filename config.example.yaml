@@ -52,6 +52,28 @@ docker:
   - vaultwarden
   cooldown: 6000
 
+http_services:
+  interval: 60
+  failure_duration: 120
+  cooldown: 600
+  monitored:
+    vaultwarden:
+      url: https://vault.example.com
+      timeout: 10
+      expected_status: [200]
+    immich:
+      url: https://immich.example.com
+      timeout: 10
+      expected_status: [200]
+
+internet:
+  url: https://example.com
+  timeout: 10
+  expected_status: [200]
+  interval: 60
+  failure_duration: 120
+  cooldown: 600
+
 logger:
   level: INFO
   format: "%(levelname)s | %(name)s | %(message)s"

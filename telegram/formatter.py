@@ -1,5 +1,6 @@
 from models import CpuMetrics, MemoryMetrics, DiskMetrics, SystemStatus, DockerContainerMetrics
-from alerts.models import MetricStatus, NumericAlertData, ContainerAlertData
+from alerts.models import MetricStatus, NumericAlertData, ContainerAlertData, HttpAlertData
+from alerts.states import Alert
 
 
 
@@ -153,5 +154,50 @@ def format_duration(seconds: float) -> str:
     if minutes:
         msg += f'{minutes} минут '
     msg += f'{seconds} секунд'
+
+    return msg
+
+def format_http_alert(
+        data: dict[str, HttpAlertData]) -> str:
+    msg = 'ALERT\n'
+
+    for service, alert_data in data.items():
+        msg += (f'{service}\n'
+                f'Alert: {alert_data.status.alert.name}\n')
+        if alert_data.result_code is not None:
+            msg += f'Status code: {alert_data.result_code}\n'
+        if alert_data.error is not None:
+            msg += f'Error: {alert_data.error}\n'
+        if alert_data.duration is not None:
+            msg += f'Duration: {alert_data.duration:.1f} sec\n'
+
+    return msg
+
+def format_network_alert(
+        data: dict[str, HttpAlertData],
+        problem_was_notified: bool
+) -> str:
+    msg = 'ALERT\n'
+
+    for  alert_data in data.values():
+        if alert_data.status.alert == Alert.RECOVERED:
+            if problem_was_notified:
+                msg += 'Доступ к проверочному адресу восстановлен\n'
+            else:
+                msg += (
+                    'Зафиксирован сбой доступности проверочного адреса.\n'
+                    'К моменту отправки сообщения доступ уже восстановлен.\n'
+                )
+        else:
+            msg += 'Проверочный адрес недоступен\n'
+        if alert_data.duration is not None:
+            label = (
+                'Длительность сбоя'
+                if alert_data.status.alert == Alert.RECOVERED
+                else 'Сбой продолжается'
+            )
+            msg += f'{label}: {alert_data.duration:.1f} сек\n'
+
+        msg += f'Alert: {alert_data.status.alert.name}\n'
 
     return msg

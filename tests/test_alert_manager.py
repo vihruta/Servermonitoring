@@ -2,7 +2,9 @@ import pytest
 
 from alerts.states import State, Alert
 from alerts.models import Thresholds
-from alerts.manager import get_current_state, check_state_transition, get_container_state, check_container_alert
+from alerts.manager import (get_current_state, check_state_transition,
+                            get_container_state, check_container_alert,
+                            get_http_state)
 
 @pytest.mark.parametrize(
     "value, previous_state, expected_state",
@@ -112,3 +114,20 @@ def test_monitoring_containers_state_transition(
     )
 
     assert result.alert == expected_alert
+
+
+@pytest.mark.parametrize(
+    "result_code, is_failed, expected_state",
+    [
+        (200, False, State.OK),
+        (503, True, State.WARNING),
+        (None, True, State.CRITICAL),
+    ],
+)
+def test_get_http_state(result_code, is_failed, expected_state):
+    result = get_http_state(
+        result_code=result_code,
+        is_failed=is_failed,
+    )
+
+    assert result == expected_state

@@ -50,3 +50,11 @@ class SystemStatus(BaseModel):
     memory: MemoryMetrics | None
     disks: dict[str, DiskMetrics] | None
     docker_containers: dict[str, DockerContainerMetrics | None] | None
+
+class HttpMetrics(BaseModel):
+    service: str
+    result_code: int | None
+    last_success: float | None = None
+    is_failed: bool
+    error: str | None
+    duration_seconds: float

@@ -52,6 +52,43 @@ class IncidentStore:
     def remove(self, metric: str):
         self.incidents.pop(metric, None)
 
+class NetworkAccidentStore:
+    def __init__(self):
+        self.started_at: float | None = None
+        self.confirmed: bool = False
+        self.notified: bool = False
+        self.recovered_at: float | None = None
+
+    def start(self):
+        if self.started_at is None:
+            self.started_at = time.monotonic()
+
+    def confirm(self):
+        self.confirmed = True
+
+    def notify(self):
+        self.notified = True
+
+    def get_duration(self) -> float | None:
+        if self.started_at is None:
+            return None
+        else:
+            if self.recovered_at is None:
+                return time.monotonic() - self.started_at
+            else:
+                return self.recovered_at - self.started_at
+
+    def recover(self):
+        if self.recovered_at is None and self.started_at is not None:
+            self.recovered_at = time.monotonic()
+
+        
+    def reset(self):
+        self.started_at = None
+        self.confirmed = False
+        self.notified = False
+        self.recovered_at = None
+    
 class AlertCooldownStore():
     def __init__(self):
         self.cooldown: dict[str, float] = {}
@@ -71,5 +108,3 @@ class AlertCooldownStore():
 
     def remove(self, metric: str):
         self.cooldown.pop(metric, None)
-
-    
