@@ -72,6 +72,7 @@ def ram_check() -> MemoryMetrics | None:
         logger.exception('RAM check error')
         return None
 
+
 def disk_check(
         lsblk_timeout: float,
         smartctl_timeout: float
@@ -129,14 +130,19 @@ def get_disk_temp(
             ['sudo', 'smartctl', '-A', '-j', drive_path],
             capture_output=True,
             text=True, timeout=smartctl_timeout)
+        
         disk_data = json.loads(result.stdout)
+
         temperature = disk_data["temperature"]['current']
+
     except subprocess.TimeoutExpired as exception:
         logger.exception('Smartctl timeout %s', exception)
         temperature = None
+
     except Exception as exception:
         temperature = None
         logger.exception('Smartctl error %s', exception)
+        
     return temperature
 
 def get_parent_block(drive_path: str, lsblk_timeout: float) -> str | None:

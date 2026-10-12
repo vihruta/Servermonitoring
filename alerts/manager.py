@@ -1,6 +1,8 @@
 from alerts.states import State, Alert
 from alerts.models import MetricStatus, Thresholds
 from alerts.state_store import AlertCooldownStore
+from models import SmartMetrics
+from config import SmartSettings
 
 def get_current_state(
         value: float, 
@@ -120,3 +122,20 @@ def check_cooldown(status: MetricStatus,
             elif status.state == State.CRITICAL:
                 return Alert.CRITICAL
     return status.alert
+
+
+def get_smart_state(
+        metrics: SmartMetrics,
+        settings: SmartSettings,
+) -> State:
+    if metrics.critical_warning != 0:
+        return State.CRITICAL
+
+    if (
+        metrics.available_spare < settings.available_spare_warning 
+        or metrics.percent_used >= settings.percentage_used_warning
+    ):
+        return State.WARNING
+
+
+    return State.OK

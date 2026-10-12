@@ -58,3 +58,10 @@ class HttpMetrics(BaseModel):
     is_failed: bool
     error: str | None
     duration_seconds: float
+
+class SmartMetrics(BaseModel):
+    critical_warning: int
+    available_spare: float
+    percent_used: float
+    media_errors: int
+    num_err_log_entries: int

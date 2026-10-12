@@ -56,6 +56,14 @@ class TimeOutSettings(BaseModel):
     lsblk: int = Field(default=5, gt=0)
     docker: int = Field(default=10, gt=0)
 
+class SmartSettings(BaseModel):
+    interval: int = Field(default=3600, gt=0)
+    timeout: int = Field(default=10, gt=0)
+    cooldown: int = Field(default=600, ge=0)
+    available_spare_warning: float = Field(ge=0, le=100)
+    percentage_used_warning: float = Field(ge=0)
+
+
 class Settings(BaseModel):
     monitoring: MonitoringSettings
     logger: LoggerSettings
@@ -65,6 +73,7 @@ class Settings(BaseModel):
     timeouts: TimeOutSettings
     http_services: HttpServicesSettings
     internet: InternetSettings
+    smart: SmartSettings
 
 
 

@@ -7,8 +7,8 @@ from telegram.create_bot import create_bot
 from telegram.handlers import start_router
 from telegram.filters import AllowedUserFilter
 
-from alerts.state_store import AlertCooldownStore, StateStore, IncidentStore, PendingStore, NetworkAccidentStore
-from alerts.monitor import monitoring_loop, http_monitoring_loop, network_monitoring_loop
+from alerts.state_store import AlertCooldownStore, StateStore, IncidentStore, PendingStore, NetworkAccidentStore, SmartMetricsStore
+from alerts.monitor import monitoring_loop, http_monitoring_loop, network_monitoring_loop, smart_monitoring_loop
 
 from config import get_settings
 
@@ -30,6 +30,7 @@ async def main():
     incident = IncidentStore()
     pending_timer = PendingStore()
     network_incident = NetworkAccidentStore()
+    smart_store = SmartMetricsStore()
 
     bot, dp = create_bot(settings.telegram.token)
 
@@ -72,6 +73,17 @@ async def main():
                 chat_id=settings.telegram.alert_chat_id
             )
         )
+        smart_task = asyncio.create_task(
+            smart_monitoring_loop(
+                store=store,
+                settings=settings.smart,
+                smart_store=smart_store,
+                cooldown=cooldown_timer,
+                bot=bot,
+                chat_id=settings.telegram.alert_chat_id
+
+            )
+        )
         try:
             await dp.start_polling(
                 bot,
@@ -81,16 +93,15 @@ async def main():
             monitoring_task.cancel()
             http_task.cancel()
             network_task.cancel()
+            smart_task.cancel()
             
-            try:
-                await asyncio.gather(
-                    monitoring_task,
-                    http_task,
-                    network_task,
-                    return_exceptions=True
-                )
-            except asyncio.CancelledError:
-                pass
+            await asyncio.gather(
+                monitoring_task,
+                http_task,
+                network_task,
+                smart_task,
+                return_exceptions=True
+            )
 
 if __name__ == "__main__":
     asyncio.run(main())

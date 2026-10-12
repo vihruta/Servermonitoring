@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
-from alerts.states import State, Alert
+from alerts.states import State, Alert, SmartAlertReason
+from models import SmartMetrics
 
 class MetricStatus(BaseModel):
     alert: Alert
@@ -28,3 +29,9 @@ class HttpAlertData(BaseModel):
     result_code: int | None = None
     error: str | None = None
     duration: float | None = None
+
+
+class SmartAlertData(BaseModel):
+    status: MetricStatus
+    metrics: SmartMetrics
+    reasons: list[SmartAlertReason]

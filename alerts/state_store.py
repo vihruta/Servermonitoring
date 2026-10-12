@@ -52,6 +52,7 @@ class IncidentStore:
     def remove(self, metric: str):
         self.incidents.pop(metric, None)
 
+
 class NetworkAccidentStore:
     def __init__(self):
         self.started_at: float | None = None
@@ -88,7 +89,8 @@ class NetworkAccidentStore:
         self.confirmed = False
         self.notified = False
         self.recovered_at = None
-    
+
+
 class AlertCooldownStore():
     def __init__(self):
         self.cooldown: dict[str, float] = {}
@@ -108,3 +110,17 @@ class AlertCooldownStore():
 
     def remove(self, metric: str):
         self.cooldown.pop(metric, None)
+
+
+class SmartMetricsStore():
+    
+    def __init__(self):
+        self.metrics: dict[str, int] = {}
+
+
+    def increase_check(self, metric: str, measure: int) -> bool:
+        previous = self.metrics.get(metric)
+        return previous is not None and measure > previous
+
+    def set(self, metric: str, measure: int) -> None:
+        self.metrics[metric] = measure

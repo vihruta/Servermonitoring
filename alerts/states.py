@@ -10,3 +10,11 @@ class Alert(Enum):
     WARNING=1
     CRITICAL=2
     RECOVERED=3
+
+
+class SmartAlertReason(Enum):
+    CRITICAL_WARNING = 'critical_warning'
+    LOW_SPARE = 'low_spare'
+    HIGH_WEAR = 'high_wear'
+    MEDIA_ERRORS_INCREASED = 'media_errors_increased'
+    ERROR_LOG_INCREASED = 'error_log_increased'

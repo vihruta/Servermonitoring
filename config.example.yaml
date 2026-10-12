@@ -74,6 +74,13 @@ internet:
   failure_duration: 120
   cooldown: 600
 
+smart:
+  interval: 3600
+  timeout: 10
+  cooldown: 600
+  available_spare_warning: 10
+  percentage_used_warning: 20
+
 logger:
   level: INFO
   format: "%(levelname)s | %(name)s | %(message)s"

@@ -1,6 +1,6 @@
 from models import CpuMetrics, MemoryMetrics, DiskMetrics, SystemStatus, DockerContainerMetrics
-from alerts.models import MetricStatus, NumericAlertData, ContainerAlertData, HttpAlertData
-from alerts.states import Alert
+from alerts.models import MetricStatus, NumericAlertData, ContainerAlertData, HttpAlertData, SmartAlertData
+from alerts.states import Alert, SmartAlertReason
 
 
 
@@ -102,7 +102,7 @@ def format_docker_data(docker_data: dict[str, DockerContainerMetrics | None] | N
                         f'OOM killed: {info.oom_killed}\n'
                         f'Exit code: {info.exit_code}\n')
                 
-                if info.error is not None:
+                if info.error is not None and not info.error:
                     msg += f'Ошибка: {info.error}\n'
                 msg += '\n'
                 
@@ -201,3 +201,58 @@ def format_network_alert(
         msg += f'Alert: {alert_data.status.alert.name}\n'
 
     return msg
+
+def format_smart_alert(data: dict[str, SmartAlertData]) -> str:
+    messages = []
+
+    for disk, alert_data in data.items():
+        alert = alert_data.status.alert
+        metrics = alert_data.metrics
+
+        if alert == Alert.NO_ALERT:
+            continue
+
+        if alert == Alert.RECOVERED:
+            lines = [
+                '✅ SMART: восстановление',
+                f'Устройство: {disk}',
+                'Ранее выявленная проблема состояния больше не наблюдается.',
+            ]
+        else:
+            title = (
+                '🚨 SMART: критическое уведомление'
+                if alert == Alert.CRITICAL
+                else '⚠️ SMART: предупреждение'
+            )
+            lines = [title, f'Устройство: {disk}']
+
+            for reason in alert_data.reasons:
+                if reason == SmartAlertReason.CRITICAL_WARNING:
+                    lines.append(
+                        '• Предупреждение контроллера: '
+                        f'0x{metrics.critical_warning:02X}'
+                    )
+                elif reason == SmartAlertReason.LOW_SPARE:
+                    lines.append(
+                        '• Мало резервной памяти: '
+                        f'{metrics.available_spare:g}%'
+                    )
+                elif reason == SmartAlertReason.HIGH_WEAR:
+                    lines.append(
+                        '• Высокий износ: '
+                        f'{metrics.percent_used:g}% расчётного ресурса'
+                    )
+                elif reason == SmartAlertReason.MEDIA_ERRORS_INCREASED:
+                    lines.append(
+                        '• Вырос счётчик ошибок целостности данных. '
+                        f'Текущее значение: {metrics.media_errors}'
+                    )
+                elif reason == SmartAlertReason.ERROR_LOG_INCREASED:
+                    lines.append(
+                        '• Вырос счётчик записей в журнале ошибок. '
+                        f'Текущее значение: {metrics.num_err_log_entries}'
+                    )
+
+        messages.append('\n'.join(lines))
+
+    return '\n\n'.join(messages)

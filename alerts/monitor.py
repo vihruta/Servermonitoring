@@ -4,15 +4,15 @@ import httpx
 
 from alerts.state_store import (StateStore, IncidentStore, 
                                 PendingStore, AlertCooldownStore, 
-                                NetworkAccidentStore)
+                                NetworkAccidentStore, SmartMetricsStore)
 
-from monitor.http_health import http_health
 from alerts.monitoring.hardware import monitoring_cpu, monitoring_ram_usage, monitoring_disk
 from alerts.monitoring.containers import monitoring_containers
 from alerts.monitoring.http import http_monitoring
 from alerts.monitoring.network import network_monitoring_metrics
+from alerts.monitoring.smart import monitoring_smart_disk
 
-from config import Settings, HttpServicesSettings, InternetSettings
+from config import Settings, HttpServicesSettings, InternetSettings, SmartSettings
 
 logger = logging.getLogger(__name__)
 
@@ -145,3 +145,32 @@ async def network_monitoring_loop(
             logger.exception('Error while network monitoring')
 
         await asyncio.sleep(network_settings.interval)
+
+
+async def smart_monitoring_loop(
+        store: StateStore, 
+        settings: SmartSettings,
+        smart_store: SmartMetricsStore,
+        cooldown: AlertCooldownStore,
+        bot,
+        chat_id
+
+):
+    logger.info(
+        'Smart monitoring is %s second',
+        settings.interval
+    )
+    while True:
+        try:
+            await monitoring_smart_disk(
+                store=store,
+                settings=settings,
+                smart_store=smart_store,
+                cooldown=cooldown,
+                bot=bot,
+                chat_id=chat_id
+            )
+        except Exception:
+            logger.exception('Error while SMART monitoring')
+
+        await asyncio.sleep(settings.interval)
