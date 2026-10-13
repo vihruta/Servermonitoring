@@ -45,15 +45,6 @@ class DockerContainerMetrics(BaseModel):
     error: str | None
     health: str | None
 
-class SystemStatus(BaseModel):
-    uptime: float | None
-    cpu: CpuMetrics | None
-    memory: MemoryMetrics | None
-    disks: dict[str, DiskMetrics] | None
-    docker_containers: dict[str, DockerContainerMetrics | None] | None
-    http_services: dict[str, HttpServiceSnapShot] | None = None
-    smart: dict[str, SmartMetricsSnapShot] | None = None
-
 class HttpMetrics(BaseModel):
     service: str
     result_code: int | None
@@ -77,3 +68,12 @@ class HttpServiceSnapShot(BaseModel):
 class SmartMetricsSnapShot(BaseModel):
     metrics: SmartMetrics | None
     checked_at: datetime
+
+class SystemStatus(BaseModel):
+    uptime: float | None
+    cpu: CpuMetrics | None
+    memory: MemoryMetrics | None
+    disks: dict[str, DiskMetrics] | None
+    docker_containers: dict[str, DockerContainerMetrics | None] | None
+    http_services: dict[str, HttpServiceSnapShot] | None = None
+    smart: dict[str, SmartMetricsSnapShot] | None = None
