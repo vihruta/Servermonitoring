@@ -1,5 +1,9 @@
 import time
+from datetime import datetime
+
 from alerts.states import State
+from models import (HttpServiceSnapShot, HttpMetrics, 
+                    SmartMetricsSnapShot, SmartMetrics)
 
 
 class StateStore:
@@ -98,7 +102,7 @@ class AlertCooldownStore():
     def start(self, metric: str):
         self.cooldown[metric] = time.monotonic()
 
-    def check(self, metric: str, metric_cooldown: float) -> bool:
+    def check_end(self, metric: str, metric_cooldown: float) -> bool:
         last_sent_at = self.cooldown.get(metric)
 
         if last_sent_at is None:
@@ -112,11 +116,13 @@ class AlertCooldownStore():
         self.cooldown.pop(metric, None)
 
 
-class SmartMetricsStore():
+class SmartCounterStore():
     
     def __init__(self):
-        self.metrics: dict[str, int] = {}
+        self.metrics: dict[str, int | float] = {}
 
+    def initialize(self, metric: str, measure: int) -> None:
+        self.metrics.setdefault(metric, measure)
 
     def increase_check(self, metric: str, measure: int) -> bool:
         previous = self.metrics.get(metric)
@@ -124,3 +130,54 @@ class SmartMetricsStore():
 
     def set(self, metric: str, measure: int) -> None:
         self.metrics[metric] = measure
+
+
+class HttpSnapshotStore():
+
+    def __init__(self):
+        self.snapshots: dict[str, HttpServiceSnapShot] = {}
+
+    def update(
+            self,
+            service: str,
+            metrics: HttpMetrics,
+            checked_at: datetime
+            )->None:
+        
+        previous = self.snapshots.get(service)
+        
+        if not metrics.is_failed:
+            last_succes_at = checked_at
+        elif previous is not None and previous.last_success_at is not None:
+            last_succes_at = previous.last_success_at
+        else:
+            last_succes_at = None
+
+        self.snapshots[service] = HttpServiceSnapShot(
+            metrics=metrics,
+            checked_at=checked_at,
+            last_success_at=last_succes_at
+        )
+
+    def get(self, service: str) -> HttpServiceSnapShot | None:
+        return self.snapshots.get(service)
+
+
+class SmartSnapshotStore():
+
+    def __init__(self):
+        self.snapshots: dict[str, SmartMetricsSnapShot] = {}
+
+    def update(
+            self,
+            disk: str,
+            metrics: SmartMetrics | None,
+            checked_at: datetime
+    ) -> None:
+        self.snapshots[disk] = SmartMetricsSnapShot(
+            metrics=metrics,
+            checked_at=checked_at
+        )
+
+    def get(self, disk: str)-> SmartMetricsSnapShot | None:
+        return self.snapshots.get(disk)

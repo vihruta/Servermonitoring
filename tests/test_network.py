@@ -6,7 +6,7 @@ from aiogram.methods import SendMessage
 
 from alerts import state_store
 from alerts.monitoring import network as network_monitor
-from alerts.state_store import NetworkAccidentStore, AlertCooldownStore
+from alerts.state_store import HttpSnapshotStore, NetworkAccidentStore, AlertCooldownStore
 from alerts.states import Alert, State
 from config import InternetSettings
 from models import HttpMetrics
@@ -55,6 +55,7 @@ def test_network_store_happy_path(monkeypatch):
     ids=["successful_delivery", "retry_after_network_error"],
 )
 async def test_network_alert_delivery(monkeypatch, first_send_fails):
+    http_store = HttpSnapshotStore()
     current_time = 0.0
     attempts = []
     delivered = []
@@ -110,6 +111,7 @@ async def test_network_alert_delivery(monkeypatch, first_send_fails):
     async with httpx.AsyncClient() as client:
         async def run_check():
             await network_monitor.network_monitoring_metrics(
+                http_store=http_store,
                 client=client,
                 network_incident=incident,
                 network_settings=settings,
@@ -122,6 +124,8 @@ async def test_network_alert_delivery(monkeypatch, first_send_fails):
             current_time = timestamp
             await run_check()
 
+            assert http_store.get('Internet').metrics.is_failed is True
+            assert http_store.get('Internet').checked_at.tzinfo is not None
             assert attempts == []
             assert incident.started_at == 0.0
             assert incident.confirmed is False

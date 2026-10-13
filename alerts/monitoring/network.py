@@ -1,8 +1,9 @@
 import logging
 import httpx
 from aiogram.exceptions import TelegramNetworkError
+from datetime import datetime, timezone
 
-from alerts.state_store import  AlertCooldownStore, NetworkAccidentStore
+from alerts.state_store import  AlertCooldownStore, NetworkAccidentStore, HttpSnapshotStore
 from alerts.states import Alert, State
 from alerts.models import HttpAlertData, MetricStatus
 
@@ -18,6 +19,7 @@ async def network_monitoring_metrics(
     client: httpx.AsyncClient,
     network_incident: NetworkAccidentStore,
     network_settings: InternetSettings,
+    http_store: HttpSnapshotStore,
     cooldown: AlertCooldownStore,
     bot,
     chat_id,
@@ -26,6 +28,12 @@ async def network_monitoring_metrics(
     status = await network_check(
         client=client,
         service_settings=network_settings,
+    )
+    
+    http_store.update(
+        service='Internet',
+        metrics=status,
+        checked_at=datetime.now(timezone.utc),
     )
 
     if status.is_failed:
@@ -38,7 +46,7 @@ async def network_monitoring_metrics(
 
         network_incident.confirm()
 
-        if network_incident.notified and not cooldown.check(
+        if network_incident.notified and not cooldown.check_end(
             metric=metric_name,
             metric_cooldown=network_settings.cooldown,
         ):

@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from datetime import datetime
 
 class LoadAverage(BaseModel):
     min_1: float
@@ -50,6 +51,8 @@ class SystemStatus(BaseModel):
     memory: MemoryMetrics | None
     disks: dict[str, DiskMetrics] | None
     docker_containers: dict[str, DockerContainerMetrics | None] | None
+    http_services: dict[str, HttpServiceSnapShot] | None = None
+    smart: dict[str, SmartMetricsSnapShot] | None = None
 
 class HttpMetrics(BaseModel):
     service: str
@@ -65,3 +68,12 @@ class SmartMetrics(BaseModel):
     percent_used: float
     media_errors: int
     num_err_log_entries: int
+
+class HttpServiceSnapShot(BaseModel):
+    metrics: HttpMetrics
+    checked_at: datetime
+    last_success_at: datetime | None
+
+class SmartMetricsSnapShot(BaseModel):
+    metrics: SmartMetrics | None
+    checked_at: datetime

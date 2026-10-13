@@ -4,7 +4,8 @@ import httpx
 
 from alerts.state_store import (StateStore, IncidentStore, 
                                 PendingStore, AlertCooldownStore, 
-                                NetworkAccidentStore, SmartMetricsStore)
+                                NetworkAccidentStore, SmartCounterStore,
+                                HttpSnapshotStore, SmartSnapshotStore)
 
 from alerts.monitoring.hardware import monitoring_cpu, monitoring_ram_usage, monitoring_disk
 from alerts.monitoring.containers import monitoring_containers
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 async def http_monitoring_loop(
     client: httpx.AsyncClient,
     store: StateStore,
+    http_store: HttpSnapshotStore,
     incident: IncidentStore,
     cooldown_timer: AlertCooldownStore,
     bot,
@@ -36,6 +38,7 @@ async def http_monitoring_loop(
             await http_monitoring(
                 client=client,
                 store=store,
+                http_store=http_store,
                 incident=incident,
                 cooldown_timer=cooldown_timer,
                 bot=bot,
@@ -121,6 +124,7 @@ async def monitoring_loop(
         
 async def network_monitoring_loop(
         client: httpx.AsyncClient,
+        http_store: HttpSnapshotStore,
         network_incident: NetworkAccidentStore,
         network_settings: InternetSettings,
         cooldown: AlertCooldownStore,
@@ -134,12 +138,13 @@ async def network_monitoring_loop(
     while True:
         try:
             await network_monitoring_metrics(
-            client=client,
-            network_incident=network_incident,
-            network_settings=network_settings,
-            cooldown=cooldown,
-            bot=bot,
-            chat_id=chat_id,
+                client=client,
+                http_store=http_store,
+                network_incident=network_incident,
+                network_settings=network_settings,
+                cooldown=cooldown,
+                bot=bot,
+                chat_id=chat_id,
             )
         except Exception:
             logger.exception('Error while network monitoring')
@@ -150,7 +155,8 @@ async def network_monitoring_loop(
 async def smart_monitoring_loop(
         store: StateStore, 
         settings: SmartSettings,
-        smart_store: SmartMetricsStore,
+        smart_store: SmartSnapshotStore,
+        smart_counter_store: SmartCounterStore,
         cooldown: AlertCooldownStore,
         bot,
         chat_id
@@ -166,6 +172,7 @@ async def smart_monitoring_loop(
                 store=store,
                 settings=settings,
                 smart_store=smart_store,
+                smart_counter_store=smart_counter_store,
                 cooldown=cooldown,
                 bot=bot,
                 chat_id=chat_id

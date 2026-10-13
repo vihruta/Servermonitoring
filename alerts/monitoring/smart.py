@@ -1,5 +1,6 @@
 import logging
 import asyncio
+from datetime import datetime, timezone
 
 from monitor.smart import get_nvme_smartlog
 from models import SmartMetrics
@@ -7,7 +8,7 @@ from config import SmartSettings
 
 from alerts.models import SmartAlertData, MetricStatus
 
-from alerts.state_store import SmartMetricsStore, StateStore, AlertCooldownStore
+from alerts.state_store import SmartCounterStore, StateStore, AlertCooldownStore, SmartSnapshotStore
 from alerts.states import Alert, State, SmartAlertReason
 from alerts.manager import get_smart_state, check_state_transition, check_cooldown
 
@@ -20,7 +21,8 @@ logger = logging.getLogger(__name__)
 async def monitoring_smart_disk(
         store: StateStore, 
         settings: SmartSettings,
-        smart_store: SmartMetricsStore,
+        smart_store: SmartSnapshotStore,
+        smart_counter_store: SmartCounterStore,
         cooldown: AlertCooldownStore,
         bot,
         chat_id
@@ -35,16 +37,22 @@ async def monitoring_smart_disk(
         return None
     
     for disk, metrics in smart_disk_dict.items():
-        if metrics is None:
-            continue
-
         try:
+            smart_store.update(
+                disk=disk,
+                metrics=metrics,
+                checked_at=datetime.now(timezone.utc)
+            )
+            
+            if metrics is None:
+                continue
+
             await monitoring_smart_metrics(
                 store=store,
                 disk=disk,
                 metrics=metrics,
                 settings=settings,
-                smart_store=smart_store,
+                smart_store=smart_counter_store,
                 cooldown=cooldown,
                 bot=bot,
                 chat_id=chat_id
@@ -61,7 +69,7 @@ async def monitoring_smart_metrics(
         disk: str,
         metrics: SmartMetrics,
         settings: SmartSettings,
-        smart_store: SmartMetricsStore,
+        smart_store: SmartCounterStore,
         cooldown: AlertCooldownStore,
         bot,
         chat_id
@@ -92,6 +100,17 @@ async def monitoring_smart_metrics(
         metric=disk + ':media_errors',
         measure=metrics.media_errors
     )
+
+    smart_store.initialize(
+        metric=f'{disk}:media_errors',
+        measure=metrics.media_errors
+    )
+
+    smart_store.initialize(
+        metric=f'{disk}:num_err_log_entries',
+        measure=metrics.num_err_log_entries
+    )
+
 
     num_err_increased = smart_store.increase_check(
         metric=disk + ':num_err_log_entries',

@@ -18,7 +18,7 @@ from alerts.monitoring import network as network_monitor
 import alerts.state_store as state_store
 from alerts.models import Thresholds
 
-from alerts.state_store import StateStore, IncidentStore, PendingStore, AlertCooldownStore, NetworkAccidentStore
+from alerts.state_store import HttpSnapshotStore, StateStore, IncidentStore, PendingStore, AlertCooldownStore, NetworkAccidentStore
 from alerts.states import State, Alert
 
 from config import (Settings, get_yaml_config, 
@@ -1399,6 +1399,7 @@ async def test_monitoring_loop_can_be_cancelled(monkeypatch: pytest.MonkeyPatch)
 
 @pytest.mark.asyncio
 async def test_http_rapid_rejection(monkeypatch):
+    http_store = HttpSnapshotStore()
     current_time = 0
     sent_alert = 0
 
@@ -1459,6 +1460,7 @@ async def test_http_rapid_rejection(monkeypatch):
 
     async with httpx.AsyncClient(transport=fake_transport) as client:
         await http_monitor.http_monitoring(
+            http_store=http_store,
             client=client,
             store=store,
             incident=incident,
@@ -1469,6 +1471,7 @@ async def test_http_rapid_rejection(monkeypatch):
         )
         current_time = 60
         await http_monitor.http_monitoring(
+            http_store=http_store,
             client=client,
             store=store,
             incident=incident,
@@ -1485,6 +1488,7 @@ async def test_http_rapid_rejection(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_http_return_border_error(monkeypatch):
+    http_store = HttpSnapshotStore()
     current_time = 0
     sent_alert = []
 
@@ -1539,6 +1543,7 @@ async def test_http_return_border_error(monkeypatch):
 
     async with httpx.AsyncClient(transport=fake_transport) as client:
         await http_monitor.http_monitoring(
+            http_store=http_store,
             client=client,
             store=store,
             incident=incident,
@@ -1550,6 +1555,7 @@ async def test_http_return_border_error(monkeypatch):
         current_time = 119
         assert store.get(metric=f'http_check_{first_service}') == State.OK
         await http_monitor.http_monitoring(
+            http_store=http_store,
             client=client,
             store=store,
             incident=incident,
@@ -1563,6 +1569,7 @@ async def test_http_return_border_error(monkeypatch):
         assert sent_alert == []
         current_time = 120
         await http_monitor.http_monitoring(
+            http_store=http_store,
             client=client,
             store=store,
             incident=incident,
@@ -1580,6 +1587,7 @@ async def test_http_return_border_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_http_failure_timer_restarts_after_short_recovery(monkeypatch):
+    http_store = HttpSnapshotStore()
     current_time = 0
     sent_alert = []
 
@@ -1640,6 +1648,7 @@ async def test_http_failure_timer_restarts_after_short_recovery(monkeypatch):
     async with httpx.AsyncClient(transport=fake_transport) as client:
         for _ in range(8):
             await http_monitor.http_monitoring(
+                http_store=http_store,
                 client=client,
                 store=store,
                 incident=incident,
@@ -1660,6 +1669,7 @@ async def test_http_failure_timer_restarts_after_short_recovery(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_http_recovery_reports_downtime(monkeypatch):
+    http_store = HttpSnapshotStore()
     current_time = 0
     sent_alerts = []
 
@@ -1709,6 +1719,7 @@ async def test_http_recovery_reports_downtime(monkeypatch):
             current_time = timestamp
 
             await http_monitor.http_monitoring(
+                http_store=http_store,
                 client=client,
                 store=store,
                 incident=incident,
@@ -1743,11 +1754,12 @@ async def test_http_recovery_reports_downtime(monkeypatch):
 
     assert store.get(metric_name) == State.OK
     assert incident.get(metric_name) is None
-    assert cooldown_timer.check(metric_name, settings.cooldown)
+    assert cooldown_timer.check_end(metric_name, settings.cooldown)
 
 
 @pytest.mark.asyncio
 async def test_network_short_failure_is_reset(monkeypatch):
+    http_store = HttpSnapshotStore()
     is_failed = True
     current_time = 0.0
 
@@ -1789,6 +1801,7 @@ async def test_network_short_failure_is_reset(monkeypatch):
 
     async with httpx.AsyncClient() as client:
         await network_monitor.network_monitoring_metrics(
+            http_store=http_store,
             client=client,
             network_incident=network_incident,
             network_settings=network_settings,
@@ -1804,6 +1817,7 @@ async def test_network_short_failure_is_reset(monkeypatch):
         is_failed = False
 
         await network_monitor.network_monitoring_metrics(
+            http_store=http_store,
             client=client,
             network_incident=network_incident,
             network_settings=network_settings,
@@ -1819,6 +1833,7 @@ async def test_network_short_failure_is_reset(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_network_failure_is_confirmed_at_threshold(monkeypatch):
+    http_store = HttpSnapshotStore()
     is_failed = True
     current_time = 0.0
     sent_alerts = []
@@ -1873,6 +1888,7 @@ async def test_network_failure_is_confirmed_at_threshold(monkeypatch):
 
     async with httpx.AsyncClient() as client:
         await network_monitor.network_monitoring_metrics(
+            http_store=http_store,
             client=client,
             network_incident=network_incident,
             network_settings=network_settings,
@@ -1888,6 +1904,7 @@ async def test_network_failure_is_confirmed_at_threshold(monkeypatch):
         current_time = 119
 
         await network_monitor.network_monitoring_metrics(
+            http_store=http_store,
             client=client,
             network_incident=network_incident,
             network_settings=network_settings,
@@ -1902,6 +1919,7 @@ async def test_network_failure_is_confirmed_at_threshold(monkeypatch):
 
         current_time = 120
         await network_monitor.network_monitoring_metrics(
+            http_store=http_store,
             client=client,
             network_incident=network_incident,
             network_settings=network_settings,
@@ -1918,6 +1936,7 @@ async def test_network_failure_is_confirmed_at_threshold(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_network_recovery_retry_preserves_downtime(monkeypatch):
+    http_store = HttpSnapshotStore()
     current_time = 0.0
     delivered = []
     recovery_attempts = []
@@ -1981,6 +2000,7 @@ async def test_network_recovery_retry_preserves_downtime(monkeypatch):
     async with httpx.AsyncClient() as client:
         async def run_check():
             await network_monitor.network_monitoring_metrics(
+                http_store=http_store,
                 client=client,
                 network_incident=incident,
                 network_settings=settings,
@@ -2028,6 +2048,7 @@ async def test_network_recovery_retry_preserves_downtime(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_network_recovery_after_delivered_alert(monkeypatch):
+    http_store = HttpSnapshotStore()
     current_time = 0.0
     sent_alerts = []
 
@@ -2079,6 +2100,7 @@ async def test_network_recovery_after_delivered_alert(monkeypatch):
     async with httpx.AsyncClient() as client:
         async def run_check():
             await network_monitor.network_monitoring_metrics(
+                http_store=http_store,
                 client=client,
                 network_incident=incident,
                 network_settings=settings,
@@ -2135,6 +2157,7 @@ async def test_network_recovery_after_delivered_alert(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_network_alert_repeats_after_cooldown(monkeypatch):
+    http_store = HttpSnapshotStore()
     current_time = 0.0
     sent_at = []
     sent_alerts = []
@@ -2192,6 +2215,7 @@ async def test_network_alert_repeats_after_cooldown(monkeypatch):
             current_time = timestamp
 
             await network_monitor.network_monitoring_metrics(
+                http_store=http_store,
                 client=client,
                 network_incident=incident,
                 network_settings=settings,

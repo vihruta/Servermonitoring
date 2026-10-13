@@ -92,7 +92,6 @@ def test_nvme_smartlog_continues_after_disk_failure(monkeypatch):
 
         return SmartMetrics(
             critical_warning=0,
-            temperature=0,
             available_spare=0,
             percent_used=0,
             media_errors=0,
@@ -120,6 +119,7 @@ def test_nvme_smartlog_continues_after_disk_failure(monkeypatch):
     ({'Devices': [{}]}, None),
     ({}, None),
 ])
+
 def test_disk_discovery(monkeypatch, payload, expected):
     def mock_run(args, **kwargs):
         assert args == ['sudo', '-n', 'nvme', 'list', '-o', 'json']

@@ -1,7 +1,11 @@
 import logging
 import httpx
+from datetime import datetime, timezone
 
-from alerts.state_store import StateStore, IncidentStore, AlertCooldownStore
+from models import HttpMetrics
+
+from alerts.state_store import (StateStore, IncidentStore, 
+                                AlertCooldownStore, HttpSnapshotStore)
 from alerts.states import Alert, State
 from alerts.models import HttpAlertData
 from alerts.manager import check_cooldown, check_http_alert
@@ -15,6 +19,7 @@ logger = logging.getLogger(__name__)
 async def http_monitoring(
     client: httpx.AsyncClient,
     store: StateStore,
+    http_store: HttpSnapshotStore,
     incident: IncidentStore,
     cooldown_timer: AlertCooldownStore,
     bot,
@@ -29,6 +34,11 @@ async def http_monitoring(
 
     for service in http_health_list:
         try:
+            http_store.update(
+                service=service.service,
+                metrics=service,
+                checked_at=datetime.now(timezone.utc)
+            )
             await http_monitoring_metrics(
                 service_name=service.service,
                 result_code=service.result_code,
@@ -84,7 +94,6 @@ async def http_monitoring_metrics(
         cooldown_timer=cooldown_timer,
         cooldown=cooldown
     )
-    
     if status.alert == Alert.NO_ALERT:
         store.set(
             metric=metric_name,

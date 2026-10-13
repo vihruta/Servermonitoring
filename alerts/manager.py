@@ -113,7 +113,7 @@ def check_cooldown(status: MetricStatus,
                    cooldown: float) -> Alert:
     
     if status.alert == Alert.NO_ALERT and status.state in (State.WARNING, State.CRITICAL):
-        if cooldown_timer.check(
+        if cooldown_timer.check_end(
             metric=metric_name,
             metric_cooldown=cooldown
         ):

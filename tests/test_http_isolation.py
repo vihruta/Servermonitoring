@@ -7,7 +7,7 @@ from aiogram.methods import SendMessage
 
 from alerts import state_store
 from alerts.monitoring import http as http_monitor
-from alerts.state_store import AlertCooldownStore, IncidentStore, StateStore
+from alerts.state_store import HttpSnapshotStore, AlertCooldownStore, IncidentStore, StateStore
 from alerts.states import State
 from config import HttpServiceSettings, HttpServicesSettings
 from monitor import http_health
@@ -56,6 +56,7 @@ async def test_http_health_logs_unexpected_error_and_checks_next_service(caplog)
 
 @pytest.mark.asyncio
 async def test_http_monitoring_continues_after_send_error(monkeypatch):
+    http_store = HttpSnapshotStore()
     current_time = 0
     monkeypatch.setattr(state_store.time, 'monotonic', lambda: current_time)
     store = StateStore()
@@ -77,16 +78,19 @@ async def test_http_monitoring_continues_after_send_error(monkeypatch):
     async with httpx.AsyncClient(transport=transport) as client:
         for current_time in (0, 120, 121):
             await http_monitor.http_monitoring(
+                http_store=http_store,
                 client=client, store=store, incident=incident,
                 cooldown_timer=cooldown, bot=None, chat_id=123,
                 http_settings=service_settings(),
             )
 
+    assert http_store.get('first').metrics.result_code == 503
+    assert http_store.get('second').metrics.result_code == 503
     assert attempts == ['first', 'second', 'first']
     assert store.get('http_check_first') == State.OK
     assert store.get('http_check_second') == State.WARNING
-    assert cooldown.check('http_check_first', 600) is True
-    assert cooldown.check('http_check_second', 600) is False
+    assert cooldown.check_end('http_check_first', 600) is True
+    assert cooldown.check_end('http_check_second', 600) is False
 
 
 @pytest.mark.asyncio
