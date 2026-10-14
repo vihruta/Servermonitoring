@@ -5,10 +5,10 @@ After=network-online.target docker.service
 
 [Service]
 Type=simple
-User=vihruta
-Group=vihruta
-WorkingDirectory=/home/user/Projects/Servermonitoring
-ExecStart=/home/user/Projects/Servermonitoring/.venv/bin/python -u /home/user/Projects/Servermonitoring/main.py
+User=monitor
+Group=monitor
+WorkingDirectory=/home/monitor/Servermonitoring
+ExecStart=/home/monitor/Servermonitoring/.venv/bin/python -u /home/monitor/Servermonitoring/main.py
 Restart=on-failure
 RestartSec=5
 

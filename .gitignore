@@ -1,10 +1,11 @@
 .env
 config.yaml
 servermonitor.service
+todolist v.0.2.md
+install.sh
 
 .venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
-todolist v.0.2.md
